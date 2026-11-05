@@ -8,7 +8,7 @@
   var IDLE_MS = St.IDLE_MS;
   var TABS = [
     ['dash', 'Dashboard'], ['edit', 'Edit site'], ['texts', 'Texts'], ['images', 'Images'], ['books', 'Books'], ['paigam', 'Paigham'],
-    ['updates', 'Updates'], ['quiz', 'Quiz'], ['media', 'Media'], ['messages', 'Messages'], ['comments', 'Comments'],
+    ['updates', 'Updates'], ['quiz', 'Quiz'], ['alerts', 'Alerts'], ['media', 'Media'], ['messages', 'Messages'], ['comments', 'Comments'],
     ['sections', 'Sections'], ['look', 'Look & stats'], ['history', 'History'], ['security', 'Security']
   ];
   var CATS = ['Hadees', 'Sharah', 'Tafseer', 'Fatawa', 'Fiqh', 'Namaz', 'Tasawwuf', 'Radd e Batil', 'Naat', 'Lughat', 'Aqaedah', 'Ilm-Al-Nahw', 'Ilm-Al-Meeras', 'Other'];
@@ -69,12 +69,16 @@
     var today = St.ymd();
     return Promise.all([
       St.list('books', { order: 'sort' }), St.list('paigam', { order: 'date' }), St.list('updates', { order: 'date', desc: true }),
-      St.list('quiz_questions', { order: 'created' }), St.list('quiz_entries', { order: 'created', desc: true, limit: 300 }),
+      St.list('quiz_rounds', { order: 'starts_at' }), St.list('quiz_items', { order: 'sort' }), St.list('quiz_attempts', { order: 'submitted_at', desc: true, limit: 2000 }),
       St.list('gallery'), St.list('messages', { order: 'created', desc: true, limit: 300 }), St.list('comments', { order: 'created', desc: true, limit: 300 }),
-      St.getSite(), St.history(150), St.mfaStatus().catch(function () { return { enrolled: false }; }), loadSeed()
+      St.getSite(), St.history(150), St.mfaStatus().catch(function () { return { enrolled: false }; }), loadSeed(),
+      St.list('quiz_keys').catch(function () { return []; }), St.list('notifications', { order: 'publish_at', desc: true, limit: 100 }),
+      St.list('push_subscriptions').catch(function () { return []; })
     ]).then(function (r) {
-      TA.d = { books: r[0], paigam: r[1], updates: r[2], quizQ: r[3], entries: r[4], gallery: r[5], messages: r[6], comments: r[7], site: r[8], history: r[9], mfa: r[10], today: today };
-      TA.seed = r[11];
+      TA.d = { books: r[0], paigam: r[1], updates: r[2], quizRounds: r[3], quizItems: r[4], quizAttempts: r[5] || [], gallery: r[6], messages: r[7], comments: r[8],
+        site: r[9], history: r[10], mfa: r[11], today: today, quizKeys: r[13] || [], notes: r[14] || [], pushCount: (r[15] || []).length };
+      TA.seed = r[12];
+      if (window.TajQuizAdmin) window.TajQuizAdmin.reset();
       return TA.d;
     });
   }
@@ -92,7 +96,7 @@
   function draw() {
     var body = '';
     var c = TA.d, cur = TA.cur;
-    var map = { dash: dash, edit: editPanel, texts: texts, images: images, books: books, paigam: paigam, updates: updates, quiz: quiz, media: media, messages: messages, comments: comments, sections: sections, look: look, history: history, security: security };
+    var map = { dash: dash, edit: editPanel, texts: texts, images: images, books: books, paigam: paigam, updates: updates, quiz: quiz, alerts: alerts, media: media, messages: messages, comments: comments, sections: sections, look: look, history: history, security: security };
     body = (map[cur] || dash)(c);
     ad('<div class="admin-tabs" role="tablist">' + TABS.map(function (t) { return '<button class="' + (t[0] === cur ? 'on' : '') + '" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>'; }).join('') + '</div>' +
       '<section class="wrap adm" style="padding-top:18px;padding-bottom:60px">' + body + '</section>');
@@ -104,14 +108,15 @@
   function dash(c) {
     var unread = c.messages.filter(function (m) { return !m.read; }).length;
     var pend = c.comments.filter(function (x) { return x.status === 'pending'; }).length;
-    var todayQ = c.quizQ.length; var todayE = c.entries.filter(function (x) { return x.date === c.today; }).length;
+    var liveR = (c.quizRounds || []).filter(function (r) { return window.TajQuizAdmin && r.published && St.now() >= Date.parse(r.starts_at) && St.now() < Date.parse(r.ends_at); }).length;
+    var todayQ = (c.quizRounds || []).length; var todayE = (c.quizAttempts || []).length;
     var future = c.paigam.filter(function (p) { return p.date >= c.today && !p.sample; }).length;
     var card = function (n, l, sub, tab) { return '<button class="kcard" data-tab="' + tab + '" style="text-align:left"><b>' + esc(n) + '</b><span>' + esc(l) + '</span>' + (sub ? '<small class="muted">' + esc(sub) + '</small>' : '') + '</button>'; };
     return '<h2 style="margin:0 0 6px">Dashboard</h2><p class="small muted">Aaj: ' + esc(c.today) + ' · ' + (St.mode === 'demo' ? 'demo (sirf is browser me)' : 'live (sabko dikhta hai)') + '</p>' +
       '<div class="kgrid">' + card(c.books.length, 'Kitabein', c.books.filter(function (b) { return !b.read; }).length + ' bina Read link', 'books') +
       card(unread, 'Naye messages', c.messages.length + ' total', 'messages') +
       card(pend, 'Comments approval ke liye', c.comments.filter(function (x) { return x.status === 'approved'; }).length + ' approved', 'comments') +
-      card(todayQ, 'Aaj ke sawal', todayE + ' entries aaj', 'quiz') +
+      card(todayQ, 'Quiz rounds', liveR + ' live abhi · ' + todayE + ' jawab kul', 'quiz') +
       card(future, 'Paigham (aage ke din)', 'real text wale', 'paigam') +
       card(c.updates.length, 'Updates', 'timeline', 'updates') +
       card(c.gallery.length, 'Media', c.gallery.filter(function (g) { return g.kind === 'video'; }).length + ' video', 'media') +
@@ -209,16 +214,8 @@
         return '<div class="tr" style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span><b>' + esc(u.title) + '</b><br><small class="muted">' + esc(u.date) + '</small></span><button class="btn ghost sm" data-a="upd-del" data-id="' + esc(u.id) + '">Delete</button></div>';
       }).join('') + '</div>';
   }
-  function quiz(c) {
-    var qs = c.quizQ.filter(function (q) { return q.date === c.today; });
-    var ent = c.entries.filter(function (x) { return x.date === c.today; });
-    var lb = ent.slice().sort(function (a, b) { return (b.score || 0) - (a.score || 0); }).slice(0, 10);
-    return '<h2 style="margin:0 0 6px">Taj Quiz</h2><p class="small muted">Aaj ke sawal. Entries sirf aap dekh sakte hain (phone, address).</p>' +
-      '<form class="card" data-f="quiz" style="display:grid;gap:8px;margin-top:10px"><input type="date" name="date" value="' + esc(c.today) + '" required><input name="q" required maxlength="500" placeholder="Sawal"><textarea name="opts" rows="3" required placeholder="Jawab, har line par ek (kam se kam 2)"></textarea><label class="small">Sahi jawab number (1 se) <input name="ans" type="number" min="1" value="1" style="width:80px"></label><div class="actions"><button class="btn sm" type="submit">Sawal add karein</button></div></form>' +
-      '<div class="tbl" style="margin-top:12px">' + (qs.length ? qs.map(function (q, i) { return '<div class="tr" style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span>' + (i + 1) + '. ' + esc(q.q) + '<br><small class="muted">' + q.options.map(function (o, j) { return (j === q.answer ? '✓ ' : '') + esc(o); }).join(' · ') + '</small></span><button class="btn ghost sm" data-a="q-del" data-id="' + esc(q.id) + '">Delete</button></div>'; }).join('') : '<div class="tr muted">Aaj ka koi sawal nahi.</div>') + '</div>' +
-      '<h3 style="margin:18px 0 6px">Aaj ke entries (' + ent.length + ')</h3><div class="tbl">' + (ent.length ? ent.map(function (x) { return '<div class="tr" style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><span><b>' + esc(x.full_name || x.first_name) + '</b> · ' + esc(x.score) + '/' + esc(x.total) + '<br><small class="muted">' + esc(x.phone || '') + ' · ' + esc(x.address || '') + '</small></span><button class="btn ghost sm" data-a="entry-del" data-id="' + esc(x.id) + '">Hatayein</button></div>'; }).join('') : '<div class="tr muted">Abhi koi entry nahi.</div>') + '</div>' +
-      '<p class="small muted" style="margin-top:10px">Leaderboard (sirf naam + score public): ' + (lb.length ? lb.map(function (x) { return esc(x.first_name) + ' ' + esc(x.score); }).join(', ') : 'abhi nahi') + '</p>';
-  }
+  function quiz(c) { return window.TajQuizAdmin.quizPanel(c); }
+  function alerts(c) { return window.TajQuizAdmin.alertsPanel(c); }
   function media(c) {
     var vids = c.gallery.filter(function (g) { return g.kind === 'video'; });
     var photos = c.gallery.filter(function (g) { return g.kind === 'photo'; });
@@ -313,8 +310,6 @@
     if (a === 'book-del') { if (!confirm('Ye kitab hata dein?')) return; return run(St.remove('books', el.dataset.id), 'Kitab hat gayi'); }
     if (a === 'book-up' || a === 'book-down') return swapBook(el.dataset.id, a === 'book-up' ? -1 : 1);
     if (a === 'upd-del') return run(St.remove('updates', el.dataset.id), 'Update hata diya');
-    if (a === 'q-del') return run(St.remove('quiz_questions', el.dataset.id), 'Sawal hata diya');
-    if (a === 'entry-del') { if (!confirm('Ye entry hata dein?')) return; return run(St.remove('quiz_entries', el.dataset.id), 'Entry hat gayi'); }
     if (a === 'gal-del') { if (!confirm('Hata dein?')) return; return run(St.remove('gallery', el.dataset.id), 'Hata diya'); }
     if (a === 'msg-read') return run(St.update('messages', el.dataset.id, { read: el.dataset.v === '1' }), 'Save ho gaya');
     if (a === 'msg-del') { if (!confirm('Ye message hata dein?')) return; return run(St.remove('messages', el.dataset.id), 'Message hata diya'); }
@@ -326,6 +321,7 @@
     if (a === 'export') return exportBackup();
     if (a === 'mfa-start') return mfaStart();
     if (a === 'demo-reset') { St.resetDemo(); A.toast('Demo data reset ho gaya'); return show(); }
+    return window.TajQuizAdmin ? window.TajQuizAdmin.act(a, el) : undefined;
   }
   function run(p, okMsg) {
     return p.then(function () { A.toast(okMsg); return refresh(); }).catch(function (e) { A.toast('Nahi hua: ' + e.message); });
@@ -378,12 +374,6 @@
       var t = f.title.value.trim(); if (!t) return;
       return run(St.insert('updates', { date: f.date.value, title: t, body: f.body.value.trim() }), 'Update add ho gaya');
     }
-    if (k === 'quiz') {
-      var opts = f.opts.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean);
-      var ans = (+f.ans.value || 1) - 1;
-      if (opts.length < 2 || ans < 0 || ans >= opts.length) { A.toast('Kam se kam 2 jawab, aur sahi number sahi ho'); return; }
-      return run(St.insert('quiz_questions', { id: 'q' + Date.now().toString(36), date: f.date.value, q: f.q.value.trim(), options: opts, answer: ans }), 'Sawal add ho gaya');
-    }
     if (k === 'yt') return addYouTube(f.link.value.trim());
     if (k === 'stats') {
       var s = (TA.d.site.stats || []).map(function (x, i) { return { n: +f['n' + i].value || 0, suffix: f['s' + i].value, label: f['l' + i].value }; });
@@ -393,6 +383,7 @@
     if (k === 'social') return run(St.saveSite({ social: { facebook: safe(f.facebook.value), instagram: safe(f.instagram.value), youtube: safe(f.youtube.value), x: safe(f.x.value) } }), 'Links save');
     if (k === 'rules') return run(St.saveSite({ quizRules: f.rules.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean), leaderboardVisible: f.lb.checked }), 'Rules save');
     if (k === 'mfa-verify') return St.enrollMfaVerify(f.dataset.id, f.code.value).then(function () { A.toast('2FA chalu ho gaya'); show(); }).catch(function () { A.toast('Code galat hai. Dobara try karein.'); });
+    return window.TajQuizAdmin ? window.TajQuizAdmin.submit(f) : undefined;
   }
   function safe(u) { u = String(u || '').trim(); return /^https:\/\//i.test(u) ? u : ''; }
   function addYouTube(link) {
@@ -469,7 +460,7 @@
     });
     document.addEventListener('submit', function (e) {
       var f = e.target; if (!f.dataset || !f.dataset.f) return;
-      if (f.closest('#app') === null && f.id !== 'bf') return;
+      if (f.closest('#app') === null && f.closest('#modal') === null && f.id !== 'bf') return;
       e.preventDefault(); submit(f);
     });
     document.addEventListener('change', function (e) {
@@ -488,6 +479,9 @@
     });
   }
 
+  // Handles for the quiz and alerts panels (quiz-admin.js).
+  window.TajAdminState = TA;
+  window.TajAdminCtl = { draw: function () { draw(); }, refresh: function () { return refresh(); }, run: function (p, m) { return run(p, m); }, toast: function (m) { A.toast(m); } };
   window.TajAdmin = {
     active: false,
     open: function () {
