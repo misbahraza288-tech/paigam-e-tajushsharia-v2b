@@ -38,8 +38,17 @@
       'DRAFT: Quiz ka waqt owner set karega.'
     ],
     leaderboardVisible: true,
+    // Quiz PRO switches (owner sets them in Admin > Quiz). Server enforces them too.
+    quiz_enabled: true,
+    leaderboard_public: true,
+    leaderboard_live: false,
+    leaderboard_top: 10,
+    leaderboard_show_city: false,
+    // Which events create a bell notification by themselves (Admin > Alerts).
+    auto: { quiz_scheduled: true, quiz_soon: true, quiz_started: true, update: true, paigam: false, book: false },
     version: '1.0.2'
   };
+  var DEMO_TABLES = { quiz_rounds: [], quiz_items: [], quiz_keys: [], quiz_attempts: [], notifications: [], push_subscriptions: [] };
 
   function seedTables() {
     var today = ymd();
@@ -48,11 +57,21 @@
       var d = addDays(i);
       paigam.push({ id: d, date: d, text_ur: '', text_ro: 'SAMPLE: Yahan is din ka Paigham aayega. Owner apna asli text yahan likhega.', source: 'sample — owner to replace', sample: true });
     }
-    var quiz = [
-      { id: 'q1', date: today, q: 'SAMPLE: Is website par kaun si library hai?', options: ['Taj Library', 'Railway Library', 'Koi library nahi'], answer: 0 },
-      { id: 'q2', date: today, q: 'SAMPLE: Taj Quiz har din kab badalta hai?', options: ['Har din naya', 'Har hafte', 'Kabhi nahi'], answer: 0 },
-      { id: 'q3', date: today, q: 'SAMPLE: Yeh sample quiz kiska hai?', options: ['Owner ka', 'Kisi ka nahi', 'Tab ka'], answer: 0 }
+    // One SAMPLE round (starts tomorrow, 1 hour). Every question says SAMPLE — the owner replaces them.
+    var roundId = 'demo-round-1';
+    var start = new Date(Date.now() + 24 * 3600 * 1000); var end = new Date(start.getTime() + 3600 * 1000);
+    var rounds = [{ id: roundId, title: 'SAMPLE round — owner replace', starts_at: start.toISOString(), ends_at: end.toISOString(), published: true, show_leaderboard: true }];
+    var items = [
+      { id: 'demo-q1', round_id: roundId, sort: 1, q: 'SAMPLE: Is website par kaun si library hai?', options: ['Taj Library', 'Railway Library', 'Koi library nahi', 'Kuch aur'] },
+      { id: 'demo-q2', round_id: roundId, sort: 2, q: 'SAMPLE: Taj Quiz har din kab badalta hai?', options: ['Har din naya', 'Har hafte', 'Kabhi nahi', 'Pata nahi'] },
+      { id: 'demo-q3', round_id: roundId, sort: 3, q: 'SAMPLE: Yeh sample quiz kiska hai?', options: ['Owner ka', 'Kisi ka nahi', 'Tab ka', 'Koi aur'] }
     ];
+    var keys = [
+      { item_id: 'demo-q1', correct: 0, explanation: 'SAMPLE — owner to replace' },
+      { item_id: 'demo-q2', correct: 0, explanation: 'SAMPLE — owner to replace' },
+      { item_id: 'demo-q3', correct: 0, explanation: 'SAMPLE — owner to replace' }
+    ];
+    var notes = [{ id: 'demo-n1', kind: 'custom', title: 'SAMPLE notification — owner replace', body: 'Yeh bell ka demo hai.', link: '#/quiz', publish_at: new Date(Date.now() - 3600 * 1000).toISOString(), created: nowIso() }];
     var updates = [
       { id: 'u1', date: addDays(-1), title: 'New knowledge resource added', body: 'SAMPLE update — owner replace karein.' },
       { id: 'u2', date: addDays(-6), title: 'Taj Quiz ka naya round', body: 'SAMPLE update — owner replace karein.' },
@@ -61,8 +80,32 @@
     var gallery = [];
     for (var g = 1; g <= 6; g++) gallery.push({ id: 'g' + g, kind: 'photo', url: '', title: 'Photo slot ' + g + ' (owner photo upload kare)', tall: g % 3 === 0 });
     gallery.push({ id: 'v1', kind: 'video', youtube_id: '', title: 'Featured video (YouTube link Admin me paste karein)' });
-    return { paigam: paigam, quiz_questions: quiz, updates: updates, gallery: gallery };
+    return { paigam: paigam, updates: updates, gallery: gallery, quiz_rounds: rounds, quiz_items: items, quiz_keys: keys, notifications: notes };
   }
+
+  // Demo mirror of the database triggers in schema.sql: which events make a bell notification by themselves.
+  function demoAutoSettings(d) { return Object.assign({ quiz_scheduled: true, quiz_soon: true, quiz_started: true, update: true, paigam: false, book: false }, (d.site && d.site.auto) || {}); }
+  function demoPutNote(d, key, n, setPublish) {
+    var i = d.notifications.findIndex(function (x) { return x.source_key === key; });
+    if (i >= 0) { d.notifications[i] = Object.assign({}, d.notifications[i], { title: n.title, body: n.body || '', link: n.link }); if (setPublish) d.notifications[i].publish_at = n.publish_at; return; }
+    d.notifications.push({ id: uid(), kind: n.kind, title: n.title, body: n.body || '', link: n.link, publish_at: n.publish_at, source_key: key, created: nowIso() });
+  }
+  function demoAutoNotes(d, table, row) {
+    var auto = demoAutoSettings(d);
+    if (table === 'updates' && auto.update) demoPutNote(d, 'update:' + row.id, { kind: 'update', title: 'Naya update: ' + row.title, body: String(row.body || '').slice(0, 300), link: '#/updates', publish_at: nowIso() });
+    if (table === 'books' && auto.book) demoPutNote(d, 'book:' + row.id, { kind: 'book', title: 'Nayi kitab: ' + row.title_en, body: row.writer_en || '', link: '#/library', publish_at: nowIso() });
+    if (table === 'paigam' && !row.sample && auto.paigam) demoPutNote(d, 'paigam:' + row.date, { kind: 'paigham', title: 'Aaj ka Paigham aa gaya', body: String(row.text_ro || '').slice(0, 300), link: '#/paigham', publish_at: new Date(row.date + 'T00:00:00+05:30').toISOString() }, true);
+    if (table === 'quiz_rounds') demoRoundNotes(d, row);
+  }
+  function demoRoundNotes(d, r) {
+    var auto = demoAutoSettings(d); var pre = 'quiz:' + r.id + ':';
+    if (!r.published) { d.notifications = d.notifications.filter(function (x) { return String(x.source_key || '').indexOf(pre) !== 0; }); return; }
+    var t0 = parseTs(r.starts_at); var when = 'Shuru: ' + new Date(t0 + IST_OFF_MS).toISOString().slice(0, 16).replace('T', ' ') + ' IST';
+    if (auto.quiz_scheduled) demoPutNote(d, pre + 'scheduled', { kind: 'quiz', title: 'Naya Taj Quiz: ' + r.title, body: when, link: '#/quiz', publish_at: nowIso() });
+    if (auto.quiz_soon) demoPutNote(d, pre + 'soon', { kind: 'quiz', title: 'Quiz thodi der me shuru: ' + r.title, body: 'Round 10 minute me shuru hoga. Tayyar rahein.', link: '#/quiz', publish_at: new Date(t0 - 600000).toISOString() }, true);
+    if (auto.quiz_started) demoPutNote(d, pre + 'started', { kind: 'quiz', title: 'Quiz shuru ho gaya: ' + r.title, body: 'Abhi jawab dein. Ek hi baar mauka hai.', link: '#/quiz', publish_at: new Date(t0).toISOString() }, true);
+  }
+  var IST_OFF_MS = 19800000;
 
   // ---------- DEMO storage (this browser only) ----------
   function demoAll() {
@@ -70,9 +113,14 @@
     var d = raw ? JSON.parse(raw) : null;
     if (!d) {
       var s = seedTables();
-      d = { books: window.TAJ_BOOKS.map(function (b) { return Object.assign({}, b); }), paigam: s.paigam, quiz_questions: s.quiz_questions,
-        updates: s.updates, gallery: s.gallery, quiz_entries: [], messages: [], comments: [], site: {}, content: {}, assets: {}, history: [] };
+      d = { books: window.TAJ_BOOKS.map(function (b) { return Object.assign({}, b); }), paigam: s.paigam,
+        updates: s.updates, gallery: s.gallery, quiz_rounds: s.quiz_rounds, quiz_items: s.quiz_items, quiz_keys: s.quiz_keys,
+        quiz_attempts: [], notifications: s.notifications, push_subscriptions: [], messages: [], comments: [], site: {}, content: {}, assets: {}, history: [] };
     }
+    // Older demo data (before quiz PRO) gets the new collections added once, without losing anything.
+    Object.keys(DEMO_TABLES).forEach(function (k) { if (!d[k]) d[k] = JSON.parse(JSON.stringify(DEMO_TABLES[k])); });
+    if (!raw) { try { localStorage.setItem(DKEY, JSON.stringify(d)); } catch (e) {} }   // first visit keeps its sample data
+
     d.site = d.site || {}; d.content = d.content || {}; d.assets = d.assets || {}; d.history = d.history || [];
     return d;
   }
@@ -106,7 +154,7 @@
       var j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { j = null; }
       if (!r.ok) {
         var msg = (j && (j.message || j.msg || j.error_description || j.error)) || ('HTTP ' + r.status);
-        var err = new Error(friendly(msg, r.status)); err.status = r.status; throw err;
+        var err = new Error(friendly(msg, r.status)); err.status = r.status; err.raw = String(msg); throw err;
       }
       return j;
     });
@@ -149,8 +197,81 @@
   function cacheGet(name) { try { return JSON.parse(localStorage.getItem(CACHE + name) || 'null'); } catch (e) { return null; } }
   function cacheSet(name, v) { try { localStorage.setItem(CACHE + name, JSON.stringify(v)); } catch (e) {} }
 
-  var VIEW = { leaderboard: 'public_leaderboard' };
-  var PUBLIC_TABLES = { books: 1, paigam: 1, updates: 1, quiz_questions: 1, gallery: 1 };
+  var VIEW = {};
+  var PUBLIC_TABLES = { books: 1, paigam: 1, updates: 1, gallery: 1, quiz_rounds: 1, quiz_items: 1, notifications: 1 };
+
+  // ----- clock: the server's clock in live mode; in demo mode an injectable offset (tests and previews only) -----
+  var serverOffset = 0;
+  function demoOffset() { try { return +localStorage.getItem('taj-demo-offset') || 0; } catch (e) { return 0; } }
+  function parseTs(s) { return Date.parse(String(s).replace(/(\.\d{3})\d+/, '$1')); }
+  // The quiz refusals come back as short codes; the UI maps them to Hinglish lines.
+  function codeError(code) { var e = new Error(code); e.raw = code; return e; }
+  function isOwnerDemo() { var s = session(); return !!(s && s.demo); }
+  var QUIZ_SETTING_KEYS = ['quiz_enabled', 'leaderboard_public', 'leaderboard_live', 'leaderboard_top', 'leaderboard_show_city'];
+  function roundStatus(r, now) {
+    if (!r.published) return 'draft';
+    if (now < parseTs(r.starts_at)) return 'scheduled';
+    if (now < parseTs(r.ends_at)) return 'live';
+    return 'ended';
+  }
+  function demoSettings(d) { var s = {}; Object.keys(SITE_DEFAULTS).forEach(function (k) { s[k] = SITE_DEFAULTS[k]; }); Object.keys(d.site || {}).forEach(function (k) { s[k] = d.site[k]; }); return s; }
+  // Demo stand-ins for the database functions (same rules as schema.sql, checked by the same tests in spirit).
+  function demoRpc(name, a, d) {
+    var now = Store.now(); var st = demoSettings(d);
+    if (name === 'quiz_state') {
+      return { server_now: new Date(now).toISOString(), enabled: st.quiz_enabled !== false, leaderboard_public: st.leaderboard_public !== false,
+        leaderboard_live: !!st.leaderboard_live, leaderboard_top: +st.leaderboard_top || 10, leaderboard_show_city: !!st.leaderboard_show_city,
+        rounds: d.quiz_rounds.filter(function (r) { return r.published; }).sort(function (x, y) { return parseTs(x.starts_at) - parseTs(y.starts_at); }).map(function (r) {
+          return { id: r.id, title: r.title, starts_at: r.starts_at, ends_at: r.ends_at, status: roundStatus(r, now), show_leaderboard: r.show_leaderboard !== false,
+            items: d.quiz_items.filter(function (i) { return i.round_id === r.id; }).length };
+        }) };
+    }
+    var r = d.quiz_rounds.filter(function (x) { return x.id === a.p_round || x.id === a.round_id; })[0];
+    if (name === 'quiz_submit') {
+      if (a.p_hp) throw codeError('bot');
+      if (st.quiz_enabled === false) throw codeError('quiz_off');
+      if (!r || !r.published) throw codeError('round_missing');
+      if (now < parseTs(r.starts_at)) throw codeError('not_open_yet');
+      if (now >= parseTs(r.ends_at)) throw codeError('quiz_ended');
+      var name2 = String(a.p_name || '').replace(/\s+/g, ' ').trim();
+      if (name2.length < 2 || name2.length > 80) throw codeError('bad_name');
+      var addr = String(a.p_address || '').trim();
+      if (addr.length < 5 || addr.length > 300) throw codeError('bad_address');
+      var phone = String(a.p_phone || '').replace(/\D/g, '');
+      if (phone.length === 12 && phone.slice(0, 2) === '91') phone = phone.slice(2);
+      if (phone.length === 11 && phone[0] === '0') phone = phone.slice(1);
+      if (phone.length !== 10) throw codeError('bad_phone');
+      var items = d.quiz_items.filter(function (i) { return i.round_id === r.id; }).sort(function (x, y) { return x.sort - y.sort; });
+      var ans = a.p_answers || [];
+      if (!items.length || ans.length !== items.length || ans.some(function (x) { return !(x >= 0 && x <= 3); })) throw codeError('bad_answers');
+      if (d.quiz_attempts.some(function (x) { return x.round_id === r.id && x.phone_norm === phone; })) throw codeError('already_submitted');
+      var score = 0; items.forEach(function (it, i) { var k = d.quiz_keys.filter(function (kk) { return kk.item_id === it.id; })[0]; if (k && ans[i] === k.correct) score++; });
+      var row = { id: uid(), round_id: r.id, phone_norm: phone, name: name2, address: addr, city: String(a.p_city || '').trim().slice(0, 60) || null,
+        answers: ans.slice(), score: score, total: items.length, winner: false, pinned: false, hidden: false, submitted_at: new Date(now).toISOString() };
+      d.quiz_attempts.push(row); demoSave(d);
+      return { ok: true, score: score, total: items.length };
+    }
+    if (name === 'quiz_reveal') {
+      if (!r || !r.published) throw codeError('round_missing');
+      if (!(isOwnerDemo() || now >= parseTs(r.ends_at))) throw codeError('not_ended');
+      return { round: r.title, items: d.quiz_items.filter(function (i) { return i.round_id === r.id; }).sort(function (x, y) { return x.sort - y.sort; }).map(function (i) {
+        var k = d.quiz_keys.filter(function (kk) { return kk.item_id === i.id; })[0] || {};
+        return { id: i.id, q: i.q, options: i.options, correct: k.correct, explanation: k.explanation || null }; }) };
+    }
+    if (name === 'quiz_leaderboard') {
+      if (!r || !r.published) return [];
+      var owner = isOwnerDemo();
+      if (!owner) {
+        if (r.show_leaderboard === false || st.leaderboard_public === false) return [];
+        if (now < parseTs(r.ends_at) && !st.leaderboard_live) return [];
+      }
+      var rows = d.quiz_attempts.filter(function (x) { return x.round_id === r.id && (owner || !x.hidden); })
+        .sort(function (x, y) { return (y.pinned - x.pinned) || (y.score - x.score) || (parseTs(x.submitted_at) - parseTs(y.submitted_at)); });
+      return rows.slice(0, +st.leaderboard_top || 10).map(function (x, i) { return { rank: i + 1, first_name: x.name.split(' ')[0], city: st.leaderboard_show_city ? (x.city || null) : null, score: x.score, total: x.total, winner: !!x.winner, pinned: !!x.pinned }; });
+    }
+    throw codeError('unknown_function');
+  }
+  var Store;
 
   function sitePatchFromRows(settings, contentRows, assetRows) {
     var site = Object.assign({}, SITE_DEFAULTS, settings || {});
@@ -195,10 +316,6 @@
       o = o || {};
       if (!LIVE) {
         var d = demoAll();
-        if (table === 'leaderboard') {
-          var rows = applyQuery(d.quiz_entries, { eq: o.eq, order: 'score', desc: true, limit: o.limit || 10 });
-          return Promise.resolve(rows.map(function (r) { return { id: r.id, first_name: r.first_name, score: r.score, date: r.date }; }));
-        }
         return Promise.resolve(applyQuery(d[table] || [], o));
       }
       var t = VIEW[table] || table;
@@ -215,7 +332,7 @@
       row = Object.assign({}, row);
       if (!LIVE) {
         var d = demoAll(); row.id = row.id || uid(); row.created = row.created || nowIso();
-        d[table].push(row); demoSave(d); return Promise.resolve(row);
+        d[table].push(row); demoAutoNotes(d, table, row); demoSave(d); return Promise.resolve(row);
       }
       row.id = row.id || newId();
       return live('POST', '/rest/v1/' + table, row, { Prefer: 'return=minimal' }).then(function () { return row; });
@@ -227,7 +344,7 @@
         var d = demoAll(); row.id = row.id || uid();
         var i = d[table].findIndex(function (x) { return String(x.id) === String(row.id); });
         if (i >= 0) d[table][i] = Object.assign({}, d[table][i], row); else { row.created = row.created || nowIso(); d[table].push(row); }
-        demoSave(d); return Promise.resolve(row);
+        demoAutoNotes(d, table, row.date ? row : row); demoSave(d); return Promise.resolve(row);
       }
       return live('POST', '/rest/v1/' + table + '?on_conflict=id', row, { Prefer: 'resolution=merge-duplicates,return=representation' }).then(function (r) { return r && r[0]; });
     },
@@ -235,7 +352,7 @@
     update: function (table, id, patch) {
       if (!LIVE) {
         var d = demoAll(); var i = d[table].findIndex(function (x) { return String(x.id) === String(id); });
-        if (i >= 0) { d[table][i] = Object.assign({}, d[table][i], patch); demoSave(d); }
+        if (i >= 0) { d[table][i] = Object.assign({}, d[table][i], patch); if (table === 'quiz_rounds') demoRoundNotes(d, d[table][i]); demoSave(d); }
         return Promise.resolve(true);
       }
       return live('PATCH', '/rest/v1/' + table + '?id=eq.' + encodeURIComponent(id), patch, { Prefer: 'return=minimal' });
@@ -366,14 +483,98 @@
 
     // Whole-site export for backup (owner only in live mode).
     exportAll: function () {
-      var tables = ['books', 'paigam', 'updates', 'quiz_questions', 'gallery'];
+      var tables = ['books', 'paigam', 'updates', 'gallery', 'quiz_rounds', 'quiz_items', 'quiz_attempts', 'notifications'];
       var owner = { exported_at: nowIso(), mode: LIVE ? 'live' : 'demo' };
-      if (!LIVE) { var d = demoAll(); tables.forEach(function (t) { owner[t] = d[t]; }); owner.site = d.site; owner.content = d.content; owner.assets = d.assets; return Promise.resolve(owner); }
-      return Promise.all([Store.getSite(), Store.list('books'), Store.list('paigam'), Store.list('updates'), Store.list('quiz_questions'), Store.list('gallery')]).then(function (r) {
-        owner.site_settings = r[0]; owner.books = r[1]; owner.paigam = r[2]; owner.updates = r[3]; owner.quiz_questions = r[4]; owner.gallery = r[5];
+      if (!LIVE) { var d = demoAll(); tables.forEach(function (t) { owner[t] = d[t]; }); owner.site = d.site; owner.content = d.content; owner.assets = d.assets; owner.quiz_keys = d.quiz_keys; return Promise.resolve(owner); }
+      return Promise.all([Store.getSite(), Store.list('books'), Store.list('paigam'), Store.list('updates'), Store.list('gallery'),
+        Store.list('quiz_rounds'), Store.list('quiz_items'), Store.list('quiz_keys'), Store.list('quiz_attempts'), Store.list('notifications')]).then(function (r) {
+        owner.site_settings = r[0]; owner.books = r[1]; owner.paigam = r[2]; owner.updates = r[3]; owner.gallery = r[4];
+        owner.quiz_rounds = r[5]; owner.quiz_items = r[6]; owner.quiz_keys = r[7]; owner.quiz_attempts = r[8]; owner.notifications = r[9];
         return owner;
       });
     },
+    // ----- clock and Quiz PRO (rounds, questions, answer key, attempts) -----
+    // Store.now(): the server's clock in live mode (set by quizState); in demo mode the real clock plus an
+    // offset the tests (or a demo preview) may set in localStorage 'taj-demo-offset' (ms). Not used in live mode.
+    now: function () { return Date.now() + (LIVE ? serverOffset : demoOffset()); },
+    // Calls a database function (live) or its demo stand-in. Refusals come back with .raw = the short code.
+    rpc: function (name, args) {
+      if (!LIVE) return Promise.resolve().then(function () { return demoRpc(name, args || {}, demoAll()); });
+      return live('POST', '/rest/v1/rpc/' + name, args || {});
+    },
+    quizState: function () {
+      return Store.rpc('quiz_state', {}).then(function (s) {
+        if (LIVE && s && s.server_now) serverOffset = parseTs(s.server_now) - Date.now();
+        return s;
+      });
+    },
+    // Owner: save one round and (optionally) its questions + answer key. items/keys carry their own ids.
+    quizSaveRound: function (round, items, keys) {
+      round = Object.assign({}, round); round.id = round.id || newId();
+      if (!LIVE) {
+        var d = demoAll();
+        var i = d.quiz_rounds.findIndex(function (x) { return x.id === round.id; });
+        if (i >= 0) d.quiz_rounds[i] = Object.assign({}, d.quiz_rounds[i], round); else { round.created = nowIso(); d.quiz_rounds.push(round); }
+        if (items) {
+          var old = d.quiz_items.filter(function (x) { return x.round_id === round.id; }).map(function (x) { return x.id; });
+          d.quiz_items = d.quiz_items.filter(function (x) { return x.round_id !== round.id; });
+          d.quiz_keys = d.quiz_keys.filter(function (k) { return old.indexOf(k.item_id) < 0; });
+          items.forEach(function (it) { d.quiz_items.push(Object.assign({}, it, { round_id: round.id })); });
+          (keys || []).forEach(function (k) { d.quiz_keys.push(Object.assign({}, k)); });
+        }
+        demoRoundNotes(d, d.quiz_rounds[d.quiz_rounds.findIndex(function (x) { return x.id === round.id; })]);
+        demoSave(d); return Promise.resolve(round);
+      }
+      var p = live('POST', '/rest/v1/quiz_rounds?on_conflict=id', round, { Prefer: 'resolution=merge-duplicates,return=minimal' });
+      if (items) {
+        p = p.then(function () { return live('DELETE', '/rest/v1/quiz_items?round_id=eq.' + encodeURIComponent(round.id), null, { Prefer: 'return=minimal' }); })
+          .then(function () { return items.length ? live('POST', '/rest/v1/quiz_items', items.map(function (it) { return Object.assign({}, it, { round_id: round.id }); }), { Prefer: 'return=minimal' }) : null; })
+          .then(function () { return keys && keys.length ? live('POST', '/rest/v1/quiz_keys?on_conflict=item_id', keys, { Prefer: 'resolution=merge-duplicates,return=minimal' }) : null; });
+      }
+      return p.then(function () { return round; });
+    },
+    // Owner: delete a round with its questions, key and attempts (the database cascades; demo does it here).
+    quizDeleteRound: function (id) {
+      if (!LIVE) {
+        var d = demoAll(); var items = d.quiz_items.filter(function (x) { return x.round_id === id; }).map(function (x) { return x.id; });
+        d.quiz_rounds = d.quiz_rounds.filter(function (x) { return x.id !== id; });
+        d.quiz_items = d.quiz_items.filter(function (x) { return x.round_id !== id; });
+        d.quiz_keys = d.quiz_keys.filter(function (k) { return items.indexOf(k.item_id) < 0; });
+        d.quiz_attempts = d.quiz_attempts.filter(function (x) { return x.round_id !== id; });
+        demoSave(d); return Promise.resolve(true);
+      }
+      return live('DELETE', '/rest/v1/quiz_rounds?id=eq.' + encodeURIComponent(id), null, { Prefer: 'return=minimal' });
+    },
+    // Owner: a visitor's answers are never edited here; this only changes the owner's marks (winner, pinned, hidden).
+    attemptMark: function (id, patch) { return Store.update('quiz_attempts', id, patch); },
+    attemptsWipe: function (roundId) {
+      if (!LIVE) { var d = demoAll(); d.quiz_attempts = d.quiz_attempts.filter(function (x) { return x.round_id !== roundId; }); demoSave(d); return Promise.resolve(true); }
+      return live('DELETE', '/rest/v1/quiz_attempts?round_id=eq.' + encodeURIComponent(roundId), null, { Prefer: 'return=minimal' });
+    },
+    attemptsReset: function (roundId) {
+      var patch = { winner: false, pinned: false, hidden: false };
+      if (!LIVE) { var d = demoAll(); d.quiz_attempts.forEach(function (x) { if (x.round_id === roundId) Object.assign(x, patch); }); demoSave(d); return Promise.resolve(true); }
+      return live('PATCH', '/rest/v1/quiz_attempts?round_id=eq.' + encodeURIComponent(roundId), patch, { Prefer: 'return=minimal' });
+    },
+    // Notifications (bell). The owner writes; visitors read those whose time has come.
+    notify: function (row) { return Store.insert('notifications', Object.assign({ kind: 'custom', publish_at: nowIso() }, row)); },
+    // Web Push: a visitor's browser subscription (insert only; the owner later reads it through the sender).
+    pushSubscribe: function (sub) {
+      var k = (sub && sub.keys) || {};
+      var row = { endpoint: sub.endpoint, p256dh: k.p256dh, auth: k.auth };
+      if (!LIVE) { var d = demoAll(); if (!d.push_subscriptions.some(function (x) { return x.endpoint === row.endpoint; })) { row.id = uid(); row.created = nowIso(); d.push_subscriptions.push(row); demoSave(d); } return Promise.resolve(true); }
+      return live('POST', '/rest/v1/push_subscriptions', row, { Prefer: 'return=minimal' }).catch(function (e) { if (e.status === 409) return true; throw e; });
+    },
+    // Owner: send a Web Push for one notification through the Edge Function the owner deploys (see docs).
+    sendPush: function (notificationId) {
+      if (!LIVE) return Promise.reject(codeError('push_needs_live'));
+      return refreshIfNeeded().then(function () {
+        return fetchT(C.supabaseUrl + '/functions/v1/' + (C.pushFunction || 'send-push'), { method: 'POST', headers: headers(), body: JSON.stringify({ notification_id: notificationId }) }).then(readJson);
+      });
+    },
+    vapidKey: function () { return C.vapidPublicKey || ''; },
+    pushReady: function () { return !!(LIVE && C.vapidPublicKey && 'serviceWorker' in navigator && 'PushManager' in window); },
+    DEMO_TABLES: DEMO_TABLES,
     resetDemo: function () { localStorage.removeItem(DKEY); },
     SITE_DEFAULTS: SITE_DEFAULTS,
     IDLE_MS: IDLE_MS,
