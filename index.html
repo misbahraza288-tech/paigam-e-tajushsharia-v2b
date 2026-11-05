@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Nastaliq+Urdu:wght@400;600&display=swap">
 <link rel="stylesheet" href="assets/css/styles.css">
 <link rel="stylesheet" href="assets/css/motion.css">
+<link rel="stylesheet" href="assets/css/quiz.css">
 </head>
 <body>
 <a href="#app" class="hp" style="position:absolute">Skip to content</a>
@@ -33,9 +34,15 @@
       <span>پیغام تاج الشریعہ</span>
     </a>
     <nav class="topnav" id="topnav" aria-label="Main"></nav>
+    <div class="tb-right">
+    <button class="iconbtn bell" id="bell-btn" aria-label="Notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+      <span class="bell-count" id="bell-count" hidden>0</span>
+    </button>
     <button class="iconbtn" id="settings-btn" aria-label="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     </button>
+    </div>
   </div>
 </header>
 
@@ -48,12 +55,21 @@
 <aside class="sheet" id="sheet" aria-label="Settings"></aside>
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo"></div>
 <div class="modal" id="modal"></div>
+<section class="notes" id="notes" aria-label="Notifications" hidden>
+  <div class="notes-box">
+    <div class="notes-head"><span class="eyebrow">Notifications</span><button class="iconbtn" id="notes-close" aria-label="Band karein"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="notes-body"></div>
+  </div>
+</section>
 
 <script defer src="assets/js/config.js"></script>
 <script defer src="assets/js/books-data.js"></script>
 <script defer src="assets/js/icons.js"></script>
 <script defer src="assets/js/data.js"></script>
+<script defer src="assets/js/quiz.js"></script>
+<script defer src="assets/js/notify.js"></script>
 <script defer src="assets/js/app.js"></script>
+<script defer src="assets/js/quiz-admin.js"></script>
 <script defer src="assets/js/admin.js"></script>
 </body>
 </html>
