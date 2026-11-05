@@ -79,17 +79,66 @@ await page.click('[data-theme="light"]'); await wait(200);
 await shot('s04-settings.png');
 await page.evaluate(() => document.querySelector('#scrim').click()); await wait(200);
 
-// 4. quiz: anonymous submit, then the admin sees the entry
+// 4. quiz PRO (demo): sample round is tomorrow. Move the demo clock into the window (taj-demo-offset), answer, one attempt only.
+const rinfo = await page.evaluate(() => JSON.parse(localStorage.getItem('tajv2b-demo-v2') || '{}').quiz_rounds[0]);
+const RID = rinfo.id;
+const setClock = async (iso) => { await page.evaluate((t) => { if (t === null) localStorage.removeItem('taj-demo-offset'); else localStorage.setItem('taj-demo-offset', String(Date.parse(t) - Date.now())); }, iso); };
+await setClock(new Date(Date.parse(rinfo.starts_at) - 3 * 86400000).toISOString());
 await fresh('#/quiz');
-check('quiz form is open (sample questions)', await page.locator('#quiz-form').count() === 1);
-await page.fill('#qn', 'Test <img src=x onerror="window.__xss=1">'); // XSS probe in a name
-await page.fill('#qp', '9876543210');
-await page.fill('#qa', 'Govindpur, Dhanbad');
-const qcards = await page.locator('.qcard').count();
-for (let i = 0; i < qcards; i++) await page.locator('.qcard').nth(i).locator('.opt').first().click();
-await page.click('#quiz-form button[type=submit]'); await wait(900);
-check('quiz submit shows success', (await page.locator('#app').innerText()).includes('aaj ka quiz de chuke') || (await page.locator('#app').innerText()).toLowerCase().includes('shukriya') || (await page.locator('#app').innerText()).includes('chuke'));
-await shot('s05-quiz-done.png');
+check('before start: "Quiz shuru hone me" with a big clock', (await page.locator('#quiz-root').textContent()).includes('Quiz shuru hone me') && (await page.locator('.qz-clock.big .qz-unit').count()) === 4);
+check('before start: NO questions and NO form', (await page.locator('#qz-form').count()) === 0 && (await page.locator('.qz-opt').count()) === 0);
+await shot('q-01-countdown.png');
+await setClock(new Date(Date.parse(rinfo.starts_at) + 120000).toISOString());
+await fresh('#/quiz');
+check('during round: "Quiz khatam hone me" and the form', (await page.locator('#quiz-root').textContent()).includes('Quiz khatam hone me') && (await page.locator('#qz-form').count()) === 1);
+check('3 questions x 4 options each', (await page.locator('.qz-q').count()) === 3 && (await page.locator('.qz-opt').count()) === 12, await page.locator('.qz-opt').count());
+check('answers hidden during the round (no "sahi jawab" text)', !(await page.locator('#quiz-root').textContent()).includes('sahi jawab'));
+check('privacy note beside the form', (await page.locator('.qz-privacy').count()) === 1);
+// empty form refused
+await page.click('.qz-submit'); await wait(200);
+check('empty answers refused', (await page.locator('#qz-err').innerText()).includes('Sab sawal'));
+for (let i = 0; i < 3; i++) await page.locator('.qz-q').nth(i).locator('.qz-opt').nth(0).click();
+await page.fill('#qz-name', 'Test <img src=x onerror="window.__xss=1">');
+await page.fill('#qz-addr', 'Govindpur, Dhanbad 828109');
+await page.fill('#qz-phone', '+91 98765 43210');
+await page.fill('#qz-city', 'Dhanbad');
+await shot('q-02-questions.png');
+await page.click('.qz-submit'); await wait(700);
+const afterSubmit = await page.locator('#quiz-root').textContent();
+check('after submit: "Aapka jawab jama ho gaya" with a spinning clock', afterSubmit.includes('Aapka jawab jama ho gaya') && (await page.locator('.done-state .qz-spin').count()) === 1);
+check('one attempt: the form is gone after submit', (await page.locator('#qz-form').count()) === 0);
+check('the score is shown to the visitor', /Score: \d+ \/ 3/.test(afterSubmit));
+await page.locator('#quiz-root').scrollIntoViewIfNeeded(); await wait(500); await shot('q-03-submitted.png');
+// duplicate: same phone again, on a fresh device (no local flag) -> the server refuses it
+await page.evaluate((id) => localStorage.removeItem('taj-quiz-done-' + id), RID);
+await fresh('#/quiz'); await setClock(new Date(Date.parse(rinfo.starts_at) + 120000).toISOString()); await fresh('#/quiz');
+await page.fill('#qz-name', 'Second Try'); await page.fill('#qz-addr', 'Another address 1'); await page.fill('#qz-phone', '098765 43210');
+for (let i = 0; i < 3; i++) await page.locator('.qz-q').nth(i).locator('.qz-opt').nth(1).click();
+await page.click('.qz-submit'); await wait(600);
+const attempts = await page.evaluate(() => JSON.parse(localStorage.getItem('tajv2b-demo-v2')).quiz_attempts);
+check('duplicate phone blocked: still exactly ONE attempt stored', attempts.length === 1, attempts.length);
+check('the second try shows the submitted state, not a second form', (await page.locator('#qz-form').count()) === 0);
+// validation on a fresh device: short phone
+await page.evaluate((id) => localStorage.removeItem('taj-quiz-done-' + id), RID);
+await fresh('#/quiz'); await setClock(new Date(Date.parse(rinfo.starts_at) + 120000).toISOString()); await fresh('#/quiz');
+await page.fill('#qz-name', 'Ab'); await page.fill('#qz-addr', 'Some address'); await page.fill('#qz-phone', '12345');
+for (let i = 0; i < 3; i++) await page.locator('.qz-q').nth(i).locator('.qz-opt').nth(0).click();
+await page.click('.qz-submit'); await wait(200);
+check('short mobile number refused', (await page.locator('#qz-err').innerText()).includes('10 digit'));
+// after the end: answers + explanations shown, board shows first names only (no phone, no address)
+await setClock(new Date(Date.parse(rinfo.ends_at) + 60000).toISOString());
+await fresh('#/quiz');
+const ended = await page.locator('#quiz-root').textContent();
+check('after the end: result state and the answers', ended.includes('Quiz khatam ho chuka hai') && ended.includes('sahi jawab'));
+check('explanation shown after the end', ended.includes('SAMPLE — owner to replace'));
+check('leaderboard shows first name only', ended.includes('Test') && !ended.includes('98765') && !ended.includes('Govindpur'), ended.slice(0, 200));
+await page.locator('#quiz-root').scrollIntoViewIfNeeded(); await wait(300); await shot('q-04-ended.png');
+await setClock(null);
+// quiz OFF is shown to visitors
+await page.evaluate(() => { const d = JSON.parse(localStorage.getItem('tajv2b-demo-v2')); d.site.quiz_enabled = false; localStorage.setItem('tajv2b-demo-v2', JSON.stringify(d)); });
+await fresh('#/quiz');
+check('quiz OFF: visitors see "Quiz abhi band hai"', (await page.locator('#quiz-root').textContent()).includes('Quiz abhi band hai'));
+await page.evaluate(() => { const d = JSON.parse(localStorage.getItem('tajv2b-demo-v2')); d.site.quiz_enabled = true; localStorage.setItem('tajv2b-demo-v2', JSON.stringify(d)); });
 
 // 5. contact form (with XSS probe) + comment (XSS probe)
 await fresh('#/contact');
@@ -129,14 +178,14 @@ check('wrong password refused', (await page.locator('#lerr').innerText()).length
 await page.fill('#le', 'demo'); await page.fill('#lp', 'demo'); await page.click('#lf button[type=submit]'); await wait(900);
 
 // 8. every admin tab renders without error
-const tabs = ['dash', 'edit', 'texts', 'images', 'books', 'paigam', 'updates', 'quiz', 'media', 'messages', 'comments', 'sections', 'look', 'history', 'security'];
+const tabs = ['dash', 'edit', 'texts', 'images', 'books', 'paigam', 'updates', 'quiz', 'alerts', 'media', 'messages', 'comments', 'sections', 'look', 'history', 'security'];
 for (const t of tabs) {
   await page.click(`.admin-tabs button[data-tab="${t}"]`); await wait(250);
   const h = await page.locator('section.adm h2').first().innerText().catch(() => '');
   if (!h) errors.push('empty panel ' + t);
   const n = await page.locator('section.adm').innerText().then(s => s.length).catch(() => 0);
   check('admin tab renders: ' + t, n > 30, n);
-  if (['texts', 'books', 'messages', 'sections', 'look', 'history', 'security', 'quiz', 'media'].includes(t)) await shot('a-' + t + '.png');
+  if (['texts', 'books', 'messages', 'sections', 'look', 'history', 'security', 'media'].includes(t)) await shot('a-' + t + '.png');
 }
 
 // 9. texts: change a headline in the Texts tab, then see it on the home page, then undo from History
@@ -225,15 +274,58 @@ await page.fill('form[data-f=upd] input[name=title]', 'Test update line');
 await page.click('form[data-f=upd] button[type=submit]'); await wait(800);
 check('update added', (await page.locator('#app').innerText()).includes('Test update line'));
 
-// 17. quiz panel: entry from step 4 visible to admin, deletable; add question
+// 17. quiz PRO in admin: calendar, on/off, new round with XSS probes, attempts (pin/winner/CSV), alerts
 await page.click('.admin-tabs button[data-tab="quiz"]'); await wait(400);
-const adminQuiz = await page.locator('#app').innerText();
-check('admin sees quiz entry (phone visible to admin only)', adminQuiz.includes('9876543210'));
-check('XSS name is shown as text in admin (no injected img)', await page.locator('#app img[src="x"]').count() === 0);
-await page.fill('form[data-f=quiz] input[name=q]', 'Test sawal?');
-await page.fill('form[data-f=quiz] textarea[name=opts]', 'Haan\nNahi');
-await page.click('form[data-f=quiz] button[type=submit]'); await wait(800);
-check('quiz question added', (await page.locator('#app').innerText()).includes('Test sawal?'));
+check('calendar: a month grid of days', (await page.locator('.qz-cal .qz-day:not(.blank)').count()) >= 28);
+check('calendar: the sample round sits on its day', (await page.locator('.qz-cal .dot').count()) >= 1);
+await page.locator('.qz-cal').scrollIntoViewIfNeeded(); await wait(300); await shot('q-05-admin-calendar.png');
+await page.click('[data-a="qz-set"][data-k="quiz_enabled"][data-v="0"]'); await wait(500);
+check('owner switches the quiz OFF (saved)', await page.evaluate(() => JSON.parse(localStorage.getItem('tajv2b-demo-v2')).site.quiz_enabled === false));
+await page.click('[data-a="qz-set"][data-k="quiz_enabled"][data-v="1"]'); await wait(500);
+check('owner switches the quiz ON again', await page.evaluate(() => JSON.parse(localStorage.getItem('tajv2b-demo-v2')).site.quiz_enabled === true));
+await page.click('[data-a="qz-new"]'); await wait(300);
+await page.fill('#qr-form input[name=title]', 'Test round <img src=x onerror="window.__xss=2">');
+await page.fill('#qr-form input[name=starts]', '2030-01-10T20:00');
+await page.fill('#qr-form input[name=ends]', '2030-01-10T21:00');
+await page.check('#qr-form input[name=published]');
+await page.fill('#qr-form textarea[name=q0]', 'Test sawal <img src=x onerror="window.__xss=3">?');
+await page.fill('#qr-form input[name=o0_0]', 'Ek'); await page.fill('#qr-form input[name=o0_1]', 'Do');
+await page.fill('#qr-form input[name=o0_2]', 'Teen <b>bold</b>'); await page.fill('#qr-form input[name=o0_3]', 'Chaar');
+await page.check('#qr-form input[name=c0][value="2"]');
+await page.fill('#qr-form input[name=e0]', 'Explanation test');
+await shot('q-06-admin-editor.png');
+await page.click('#qr-form button[type=submit]'); await wait(900);
+check('new round saved from the editor', await page.evaluate(() => JSON.parse(localStorage.getItem('tajv2b-demo-v2')).quiz_rounds.some(r => r.title.indexOf('Test round') === 0)));
+check('XSS in round title: no injected image anywhere', await page.evaluate(() => document.querySelectorAll('img[src="x"]').length) === 0);
+check('XSS in round title: no code ran', await page.evaluate(() => window.__xss === undefined));
+// attempts: pin + winner + CSV
+await page.click('[data-a="qz-view"][data-v="list"]'); await wait(300);
+await page.click('[data-a="qa-open"][data-id="' + RID + '"]'); await wait(300);
+check('attempts list shows the phone and address (owner only)', (await page.locator('#app').textContent()).includes('98765') && (await page.locator('#app').textContent()).includes('Govindpur'), (await page.locator('#app').textContent()).slice(0,300));
+await page.click('[data-a="qa-mark"][data-k="pinned"][data-v="1"]'); await wait(400);
+check('owner pins an entry', (await page.locator('#app').textContent()).includes('Pinned'), (await page.locator('#app').textContent()).slice(0, 300));
+await page.locator('[data-a="qa-mark"][data-k="winner"]').first().click({ timeout: 5000 }).catch(async () => { await shot('dbg-winner.png'); }); await wait(400);
+check('owner marks a winner', (await page.locator('#app').textContent()).includes('Winner hatayein'));
+const dl = page.waitForEvent('download', { timeout: 8000 });
+await page.click('[data-a="qa-csv"]');
+const download = await dl;
+const csvText = fs.readFileSync(await download.path(), 'utf8');
+check('CSV export: header row and the entry', csvText.includes('round,submitted_ist,name') && csvText.includes('Govindpur'), csvText.slice(0, 80));
+await page.click('[data-a="qa-back"]'); await wait(300);
+// bell: a visitor sees the notification the owner just wrote (test on the public site)
+
+// notification settings + composer (alerts)
+await page.click('.admin-tabs button[data-tab="alerts"]'); await wait(400);
+check('alerts: a switch per event', (await page.locator('[data-a="al-auto"]').count()) >= 12, await page.locator('[data-a="al-auto"]').count());
+await page.click('[data-a="al-auto"][data-k="quiz_soon"][data-v="0"]'); await wait(400);
+check('alerts: "quiz soon" switched off (saved)', await page.evaluate(() => JSON.parse(localStorage.getItem('tajv2b-demo-v2')).site.auto.quiz_soon === false));
+await page.locator('.admin-tabs').scrollIntoViewIfNeeded(); await wait(300); await shot('q-07-admin-alerts.png');
+await page.fill('form[data-f=note] input[name=title]', 'Test note <img src=x onerror="window.__xss=4">');
+await page.fill('form[data-f=note] textarea[name=body]', 'Body <b>x</b>');
+await page.click('form[data-f=note] button[type=submit]'); await wait(700);
+check('composer: the notification is listed', (await page.locator('#app').innerText()).includes('Test note'));
+check('WhatsApp share button is a wa.me link', (await page.locator('a[href^="https://wa.me/?text="]').count()) >= 1);
+check('notification XSS: no injected image, no code ran', await page.evaluate(() => document.querySelectorAll('img[src="x"]').length === 0 && window.__xss === undefined));
 
 // 18. media: YouTube link (noembed is offline here; title falls back)
 await page.click('.admin-tabs button[data-tab="media"]'); await wait(300);
@@ -279,6 +371,19 @@ await page.evaluate(() => document.querySelector('#scrim').click()); await wait(
 check('tab bar indicator placed', await page.locator('#tabbar .ind').count() === 1);
 
 // 22. inactivity logout (30 min) — fake the clock
+// bell on the public site (after the owner's notification)
+await fresh('#/');
+const badgeTxt = await page.locator('#bell-count').innerText();
+check('bell shows an unread badge', Number(badgeTxt) >= 1 || badgeTxt === '9+', badgeTxt);
+await page.click('#bell-btn'); await wait(400);
+check('bell opens the notifications list', (await page.locator('#notes.on').count()) === 1 && (await page.locator('#notes').innerText()).includes('Test note'));
+check('bell list: no injected image', await page.evaluate(() => document.querySelectorAll('#notes img[src="x"]').length === 0));
+await shot('q-08-bell.png');
+await page.click('#notes-close'); await wait(300);
+check('bell closes', (await page.locator('#notes.on').count()) === 0);
+await fresh('#/');
+check('bell badge clears after opening it', (await page.locator('#bell-count').count()) === 0 || (await page.locator('#bell-count').isHidden()));
+
 await browser.close();
 const b2 = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox'] });
 const c2 = await b2.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -303,3 +408,4 @@ const failed = results.filter(r => !r.pass);
 fs.writeFileSync(path.join(OUT, 'smoke-results.json'), JSON.stringify(results, null, 1));
 console.log(`\nSMOKE ${results.length - failed.length}/${results.length} passed`);
 process.exit(failed.length ? 1 : 0);
+
