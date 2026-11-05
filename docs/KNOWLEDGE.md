@@ -1,37 +1,49 @@
-# Knowledge note — Paighaam-e-Tajushshariah v2b
+# Knowledge note — how Version B works (for the next person who touches it)
 
-## What is real and what is placeholder
-- **Recovered from the live site (2026-11-04):** all 372 book entries (Urdu and Roman titles, writers, jild, category as the original lists them, cover image links and the Google Drive read links). The Tawwun welfare trust's name and address. The section headings "Hamari Khidmat", "Muslim Bachhiyon ke liye School", "Deeni Library Bareilly me", "Taj Quiz", "Tawwun Page", and the four Ta'awun categories (Zakaat, Sadqah, Atiyat, Qurbani). The "Should Read" list (6 of the original's 7 slider books matched in the catalogue).
-- **Placeholder, marked on the page or in the admin:** Aaj ka Paigham text (every entry is "SAMPLE — owner to replace"); updates; history timeline; quiz questions (marked SAMPLE); About/Mission text (DRAFT); legal pages (DRAFT); Ta'awun goal and amount; gallery photo slots; hero photo; featured video; footer social links (empty until the owner adds them).
-- **Not recovered:** the original quiz questions (they lived in the old site's database, which was not exported), the original paigam texts, the original photos, the original admin login. Nothing from the original's database or keys is copied into this site.
-- **Original claims, unverified:** the stats (1000+ resources, 50K+ readers, 700+ quiz questions, 24/7 access) come from the original site's own numbers. The owner checks and edits them in Stats.
+## Modes
+- `config.js` empty URL/key → DEMO (localStorage in the visitor's browser; demo login demo/demo; banner shown).
+- URL + anon key → LIVE (Supabase REST and Auth). No demo banner, no demo login, no demo data.
+- The browser only ever holds the **anon (public) key**. Never put a service_role key in the repo, the site or a chat.
 
-## How it works
-- No build step. Plain HTML, CSS and JavaScript. Routes are hash links (`#/library`, `#/book/12`, `#/quiz`).
-- **Demo mode** (config keys empty): the data lives in the browser's localStorage. Owner login is user `demo`, password `demo`. Banner: "DEMO MODE — not secure".
-- **Live mode** (config keys set): the same screens read and write Supabase tables through its REST API. Writes need the owner's session. Row-level security in `supabase/schema.sql` lets the public only read the site, send a message, enter the quiz and post a pending comment.
-- **Date-keyed Paigham:** each entry has its date. The home page shows today's date's entry in Asia/Kolkata time, so it changes at midnight IST without a cron job. Entries for the next 30 days are set in admin.
-- **Quiz:** questions are keyed by date. Name, phone and address are stored privately and only the owner sees them. The leaderboard shows first name and score only.
-- **Comments and "Share Your Thoughts":** go to a queue. Comments stay pending until the owner approves them. Honeypot field and a per-browser rate limit are in place.
-- **Offline:** the service worker caches the app shell. The last Paigham is kept on the phone for offline reading.
-- **Listen:** the browser's own voice reads the Paigham text. It is not a Quran recitation.
-- **Share to WhatsApp Status:** makes a quote poster image and opens the share sheet (or downloads it and opens WhatsApp).
-- **Pencil editor:** when the owner is logged in, "Visual editor" shows a pencil on the real page text and links. Saved text is kept in site settings.
+## Content model
+- Every visible text has a stable key (`hero.title`, `explore.library.body`, …). The default is in the page code and in `assets/data/content-seed.json`.
+- `site_content` (key, value, updated_at, updated_by) holds the owner's overrides. A key with no row shows its default.
+- Link targets are stored at `<key>.url` (for example `hero.learn.url`) and only https, http, mailto, tel, `#/…` and `assets/…` are ever used as an href.
+- `site_assets` holds image URLs by slot (`logo`, `home.hero.image`). Files live in the `media` Storage bucket (public read by URL, owner-only upload, 3 MB and jpeg/png/webp limits).
+- `site_settings` (one row, `id = 'site'`) holds sections on/off, accent (curated light palette), animations (full/light/off), stats, Ta'awun, social links, quiz rules, text sizes.
+- `content_history` is written by a trigger on every change (old value, new value, who, when). Undo writes the old value back as a new change.
 
-## Known limits (be honest with the owner)
-- **Push notifications** are not built. They need a push server and VAPID keys, which are not part of the free static site. Instead, new updates show a pulsing dot for 3 days.
-- **WhatsApp auto-forwarding** of messages is not possible without the WhatsApp Business API. Instead the owner gets a Telegram message (optional) and a "Reply on WhatsApp" button on each message in the admin.
-- **Quiz answers are visible to anyone who reads the page source.** That suits a community quiz, not an exam. A stricter version needs grading on the server.
-- **YouTube and Google Drive** embeds depend on those sites. Some Drive files cannot be embedded; the page always shows an "open in a new tab" link.
-- **Photo uploads** are compressed in the browser (about 1200 px wide, JPEG) before they go to storage.
-- **Cover images** of the books are hot-linked from the original site's image host. If the owner moves the covers, update them in admin.
+## Who can write
+- `owners` is the allow-list. `is_owner()` is true when `auth.uid()` is listed (and, with `require_mfa = true`, only in an aal2 session, i.e. after the 2FA code).
+- Visitors (anon): read published content; INSERT one contact message, one quiz entry or one pending comment. Checks: lengths, email shape, phone digits, score ≤ total, honeypot column empty, and a global hourly brake per table (100 messages, 100 comments, 300 quiz entries).
+- Visitors cannot read messages, quiz entries (phone, address), pending comments, the change history, the owners list, or list the media bucket.
+- The client inserts with `Prefer: return=minimal` and sends its own id. A visitor cannot read back what it wrote, so a RETURNING clause would be refused.
 
-## Handing over to the owner
-1. The owner creates the Supabase project and owner account (README, steps 1–6).
-2. Paste the URL and anon key into `assets/js/config.js` (step 7). The owner or Misbah commits it on GitHub Pages.
-3. Log in through the hidden panel with the owner's own email. Change the stats, the Ta'awun numbers, the Paigham texts and the quiz questions from admin.
-4. Replace the SAMPLE texts and DRAFT pages. Add the hero photo. Add the social links.
-5. Turn off any section that is not needed from Sections.
+## Auth and session
+- Owner ID = email. Password set by the owner in Supabase (or in its user screen). Nobody else sees it; no hash or password is in the code.
+- Login: `/auth/v1/token?grant_type=password`. If the user has a verified TOTP factor, the code step runs: challenge, then verify, which returns an aal2 token.
+- Tokens live in sessionStorage only and are never logged. Refresh happens before expiry. The panel logs out after 30 minutes without a tap or key press.
+- 2FA enrolment (admin → Security): `POST /auth/v1/factors` returns the QR; verify with a code. Then `update public.owners set require_mfa = true …` (SQL, once).
 
-## Switching demo mode off
-Paste the Supabase keys into `assets/js/config.js` and run the schema. Nothing else changes. To clear demo data on this phone, use Settings in admin (demo only).
+## Offline and failures
+- Public reads are cached in localStorage (`taj-cache-v2-*`). If the backend is unreachable, the last good content is shown. The site never shows a blank page because of the network.
+- Service worker: network first for same-origin files (so a new config.js reaches visitors at once); the cache is only used when offline. Supabase is never cached.
+
+## Security headers and output
+- CSP meta (script-src 'self' only; no inline event handlers; connect-src limited to Supabase and noembed for YouTube titles; frame-src YouTube and Drive). Note: `frame-ancestors` is not honoured in a meta tag; set it as a response header on the host if the owner wants it.
+- All user-supplied text is escaped before it goes into HTML. Injected HTML probes (img onerror, script, svg onload) are tested in `tests/smoke-demo.mjs`.
+
+## Tests and what they cover
+- `tests/sql/rls-test.mjs` runs the real `schema.sql` on Postgres (PGlite) with small stubs for Supabase's `auth` and `storage` schemas: 49 checks of anon vs owner vs other user vs MFA. Stubs are not Supabase itself.
+- `supabase/policy-test.mjs` checks a REAL project over HTTP with the anon key. It writes one "POLICY-TEST" message. Run it after setup.
+- `tests/live-mock.mjs` drives the live client against a mock backend (not Supabase): reads, anon insert, login, MFA, owner token on writes, undo, upload, offline cache.
+- `tests/smoke-demo.mjs` drives demo mode at 390x844 through every panel and public page (78 checks).
+
+## Not tested here
+- A real Supabase project (none exists yet). Real MFA apps, real e-mail flows, real Storage size limits (enforced by Storage, not the database), real CDN caching.
+
+## Handover
+See docs/OWNER-GUIDE.md section 5. Summary: new owner user + owners row; remove the old owner; transfer the GitHub repo and (if wanted) the Supabase project; the config holds only the URL and anon key, so nothing secret moves.
+
+## Changing the hidden route
+`adminRoute` in `assets/js/config.js`. Changing it does not change the security; it only changes what a visitor would have to guess.
