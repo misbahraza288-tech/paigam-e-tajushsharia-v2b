@@ -6,6 +6,8 @@
 <title>Paighaam-e-Tajushshariah</title>
 <meta name="description" content="Taj Library, Taj Quiz aur roz ka Paigham — Paighaam-e-Tajushshariah.">
 <meta name="theme-color" content="#FBF8F1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://*.supabase.co https://noembed.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://drive.google.com https://docs.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta property="og:title" content="Paighaam-e-Tajushshariah">
 <meta property="og:description" content="Taj Library, Taj Quiz aur roz ka Paigham.">
 <link rel="manifest" href="manifest.webmanifest">
@@ -15,6 +17,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Nastaliq+Urdu:wght@400;600&display=swap">
 <link rel="stylesheet" href="assets/css/styles.css">
+<link rel="stylesheet" href="assets/css/motion.css">
 </head>
 <body>
 <a href="#app" class="hp" style="position:absolute">Skip to content</a>
@@ -36,7 +39,7 @@
   </div>
 </header>
 
-<main id="app" tabindex="-1"></main>
+<main id="app" tabindex="-1"><div class="wrap" aria-hidden="true" style="padding-top:34px"><div class="skel"></div><div class="skel short"></div><div class="skel"></div></div></main>
 
 <nav class="tabbar" id="tabbar" aria-label="Bottom"></nav>
 
@@ -52,8 +55,5 @@
 <script defer src="assets/js/data.js"></script>
 <script defer src="assets/js/app.js"></script>
 <script defer src="assets/js/admin.js"></script>
-<script>
-  if ('serviceWorker' in navigator) { /* registered in app.js */ }
-</script>
 </body>
 </html>
