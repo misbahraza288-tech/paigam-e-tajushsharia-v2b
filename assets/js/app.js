@@ -7,13 +7,19 @@
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var SVG = function (n, c) { return I.svg(n, c); };
   var S = { site: null, books: [], paigam: [], updates: [], gallery: [], quizQ: [], comments: [], lb: [], scholar: null, today: St.ymd(), ready: false };
-  var PREF = { theme: localStorage.getItem('taj-theme') || 'light', uscale: parseFloat(localStorage.getItem('taj-uscale') || '1') };
+  var ACCENTS = { sage: ['#4F6F5E', '#2E4A3D'], teal: ['#3E6B6B', '#274A4A'], clay: ['#9C6B5A', '#6E4536'], slate: ['#5C6F8A', '#3D4D66'], olive: ['#6B7A3E', '#4A5628'], plum: ['#7A5C75', '#533C50'] };
+  var PREF = { theme: localStorage.getItem('taj-theme') || 'light', uscale: parseFloat(localStorage.getItem('taj-uscale') || '1'), anim: localStorage.getItem('taj-anim') || '' };
+  function shakeEl(el) { var f = (el && el.closest && el.closest('form')) || el; if (!f) return; f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); }
   var IMG_FALLBACK = '';
+  var ADMIN_ROUTE = (window.TAJ_CONFIG && window.TAJ_CONFIG.adminRoute) || 'tajush-desk';
   var openBook = null;
 
   function toast(msg) { var t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('on'); }, 2600); }
   function T(k, def) { var o = S.site && S.site.texts && S.site.texts[k]; return esc(o && o.text != null && o.text !== '' ? o.text : def); }
-  function TL(k) { var o = S.site && S.site.texts && S.site.texts[k]; return o && o.url ? o.url : null; }
+  function TL(k) { return safeUrl(T_raw(k + '.url')); }
+  function T_raw(k) { var o = S.site && S.site.texts && S.site.texts[k]; return o && o.text != null ? o.text : null; }
+  // Only https, http, mailto, tel and in-site links ever reach an href.
+  function safeUrl(u) { u = String(u == null ? '' : u).trim(); if (!u) return ''; if (/^(https?:|mailto:|tel:)/i.test(u) || /^#\//.test(u) || /^assets\//.test(u)) return u; return ''; }
   function on(sec) { return !S.site || !S.site.sections || S.site.sections[sec] !== false; }
   function hijri(d) { try { return new Intl.DateTimeFormat('en-u-ca-islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(d || new Date()); } catch (e) { return ''; } }
   function fmtDate(ymd) { var p = ymd.split('-'); var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }); }
@@ -23,9 +29,13 @@
   // ----- theme, size, sheet, drawer -----
   function applyPrefs() {
     document.body.classList.toggle('dark', PREF.theme === 'dark');
+    var lvl = PREF.anim || (S.site && S.site.animations) || 'full';
+    document.body.classList.remove('anim-full', 'anim-light', 'anim-off'); document.body.classList.add('anim-' + (['full', 'light', 'off'].indexOf(lvl) >= 0 ? lvl : 'full'));
     var mobile = window.innerWidth < 700;
     var owner = S.site && S.site.sizes ? (mobile ? S.site.sizes.mobile : S.site.sizes.desktop) / 100 : 1;
     document.documentElement.style.setProperty('--scale', (owner * PREF.uscale).toFixed(3));
+    var acc = ACCENTS[(S.site && S.site.accent) || 'sage'] || ACCENTS.sage;
+    if (PREF.theme !== 'dark') { document.documentElement.style.setProperty('--sage', acc[0]); document.documentElement.style.setProperty('--sage-deep', acc[1]); } else { document.documentElement.style.removeProperty('--sage'); document.documentElement.style.removeProperty('--sage-deep'); }
     var m = $('meta[name=theme-color]'); if (m) m.setAttribute('content', PREF.theme === 'dark' ? '#141A17' : '#FBF8F1');
   }
   function openDrawer(v) { $('#drawer').classList.toggle('on', v); $('#scrim').classList.toggle('on', v); }
@@ -52,10 +62,13 @@
     $('#sheet').innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span class="eyebrow">Settings</span><button class="iconbtn" data-act="closeall" aria-label="Band karein">' + SVG('close') + '</button></div>' +
       '<div class="row"><span>Theme</span><div class="seg" id="seg-theme"><button data-theme="light" class="' + (PREF.theme === 'light' ? 'on' : '') + '">Day</button><button data-theme="dark" class="' + (PREF.theme === 'dark' ? 'on' : '') + '">Night</button></div></div>' +
       '<div class="row"><span>Text size</span><div class="seg"><button data-uscale="0.9">A−</button><button data-uscale="1">A</button><button data-uscale="1.12">A+</button></div></div>' +
+      '<div class="row"><span>Animations</span><div class="seg" id="seg-anim"><button data-anim="full" class="' + ((PREF.anim || (S.site && S.site.animations) || 'full') === 'full' ? 'on' : '') + '">Full</button><button data-anim="light" class="' + ((PREF.anim || (S.site && S.site.animations) || 'full') === 'light' ? 'on' : '') + '">Light</button><button data-anim="off" class="' + ((PREF.anim || (S.site && S.site.animations) || 'full') === 'off' ? 'on' : '') + '">Off</button></div></div>' +
       '<div class="row"><span>Install app</span><button class="btn ghost sm" id="install-btn" hidden>' + SVG('install') + 'Install</button></div>' +
       '<div class="row"><span>Offline paigham</span><span class="small muted">Saved on this phone</span></div>' +
       '<p class="ver">Version ' + esc(S.site && S.site.version || '1.0.2') + ' — Powered by QENLYX</p>';
     var path = currentPath();
+    var brand = $('.brand');
+    if (brand && S.site && S.site.logo_url && !brand.querySelector('img')) { var lg = document.createElement('img'); lg.className = 'brand-logo'; lg.alt = ''; lg.src = S.site.logo_url; lg.onerror = function () { lg.remove(); }; brand.insertBefore(lg, brand.firstChild); }
     var top = [['#/', 'Home'], ['#/library', 'Taj Library'], ['#/quiz', 'Taj Quiz'], ['#/paigham', 'Paigham'], ['#/about', 'About'], ['#/tawwun', 'Tawwun'], ['#/contact', 'Contact']];
     $('#topnav').innerHTML = top.map(function (x) { return '<a href="' + x[0] + '" class="' + (x[0] === '#/' + path.split('/')[0] || (x[0] === '#/' && path === '') ? 'on' : '') + '">' + esc(x[1]) + '</a>'; }).join('');
     var tabs = [['#/', 'home', 'Home', ''], ['#/library', 'book', 'Library', 'library'], ['#/quiz', 'quiz', 'Quiz', 'quiz'], ['#/paigham', 'sun', 'Paigham', 'paigham']];
@@ -119,7 +132,7 @@
   function scholarHtml() {
     if (!S.site.leaderboardVisible) return '';
     var s = S.scholar;
-    return '<div class="scholar rv">' + I.ornament('') + '<div><div class="eyebrow">Taj Scholar of the Day</div>' + (s ? '<h3 style="margin-top:4px">' + esc(s.first_name) + ' — ' + esc(s.score) + ' score</h3><p class="small muted" style="margin:0">Kal ke quiz ka result. Sirf pehla naam dikhta hai.</p>' : '<p style="margin:4px 0 0" class="muted">Kal ke quiz ka result yahan chamkega.</p>') + '</div></div>';
+    return '<div class="scholar rv">' + I.ornament('') + '<div><div class="eyebrow" data-k="scholar.eyebrow">' + T('scholar.eyebrow', 'Taj Scholar of the Day') + '</div>' + (s ? '<h3 style="margin-top:4px">' + esc(s.first_name) + ' — ' + esc(s.score) + ' score</h3><p class="small muted" style="margin:0">Kal ke quiz ka result. Sirf pehla naam dikhta hai.</p>' : '<p style="margin:4px 0 0" class="muted">Kal ke quiz ka result yahan chamkega.</p>') + '</div></div>';
   }
   function resumeHtml() {
     var r = null; try { r = JSON.parse(localStorage.getItem('taj-last-read') || 'null'); } catch (e) {}
@@ -132,28 +145,28 @@
     var s = S.site;
     var h = '';
     h += '<section style="padding-top:34px" class="hero"><div class="wrap hero-grid">' +
-      '<div class="rv"><div class="eyebrow">Taj Library · Taj Quiz · Paigham</div>' +
+      '<div class="rv"><div class="eyebrow" data-k="hero.eyebrow">' + T('hero.eyebrow', 'Taj Library · Taj Quiz · Paigham') + '</div>' +
       '<h1 style="margin-top:12px" data-k="hero.title">' + T('hero.title', 'Paighaam-e-Tajushshariah') + '<span class="ur">پیغام تاج الشریعہ</span></h1>' +
       '<p class="tagline" data-k="hero.tagline">' + T('hero.tagline', 'Ilm ko samjhiye, adab ke saath') + '</p>' +
       '<p class="sub" data-k="hero.sub">' + T('hero.sub', 'Kitabein, roz ka Paigham, quiz aur updates — ek saaf, sukoon wali jagah par.') + '</p>' +
       '<div class="ctas"><a class="btn" href="#/library">' + SVG('shelf') + 'Explore Library</a><a class="btn ghost" href="#/quiz">' + SVG('quiz') + "Today's Quiz</a></div>" +
       '<a class="linkline" href="#/about" data-k="hero.learn" data-link>' + T('hero.learn', 'Learn more') + ' ' + SVG('arrow') + '</a></div>' +
-      '<div class="rv"><div class="photo-slot"><img src="' + esc(S.site.hero_url || 'assets/img/hero.jpg') + '" alt="" onerror="this.remove()"><div class="orn">' + I.ornament('') + '</div></div></div>' +
+      '<div class="rv"><div class="photo-slot">' + (S.site.hero_url ? '<img src="' + esc(S.site.hero_url) + '" alt="" data-hide-broken>' : '') + '<div class="orn">' + I.ornament('') + '</div></div></div>' +
       '</div></section>';
     if (on('stats')) h += '<section style="padding:0 0 40px;border:0"><div class="wrap">' + statsHtml() + '</div></section>';
-    if (on('explore')) h += '<section style="padding-top:20px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Explore</div><h2>Do jagah, ek sukoon</h2></div><div class="explore">' +
-      '<a class="xcard" href="#/library"><span class="spine"></span>' + SVG('shelf') + '<h3>Taj Library</h3><div class="ur">تاج لائبریری</div><p class="muted">Kitabon ki list, search aur category ke saath. Har kitaab ka apna page.</p><span class="arrow">Library kholein ' + SVG('arrow') + '</span></a>' +
-      '<a class="xcard" href="#/quiz"><span class="spine"></span>' + SVG('quiz') + '<h3>Taj Quiz</h3><div class="ur">تاج کوئز</div><p class="muted">Roz ka quiz, countdown aur leaderboard. Naam sirf pehla dikhega.</p><span class="arrow">Quiz kholein ' + SVG('arrow') + '</span></a>' +
+    if (on('explore')) h += '<section style="padding-top:20px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Explore</div><h2 data-k="explore.heading">' + T('explore.heading', 'Do jagah, ek sukoon') + '</h2></div><div class="explore">' +
+      '<a class="xcard" href="#/library"><span class="spine"></span>' + SVG('shelf') + '<h3 data-k="explore.library.title">' + T('explore.library.title', 'Taj Library') + '</h3><div class="ur">تاج لائبریری</div><p class="muted" data-k="explore.library.body">' + T('explore.library.body', 'Kitabon ki list, search aur category ke saath. Har kitaab ka apna page.') + '</p><span class="arrow">Library kholein ' + SVG('arrow') + '</span></a>' +
+      '<a class="xcard" href="#/quiz"><span class="spine"></span>' + SVG('quiz') + '<h3 data-k="explore.quiz.title">' + T('explore.quiz.title', 'Taj Quiz') + '</h3><div class="ur">تاج کوئز</div><p class="muted" data-k="explore.quiz.body">' + T('explore.quiz.body', 'Roz ka quiz, countdown aur leaderboard. Naam sirf pehla dikhega.') + '</p><span class="arrow">Quiz kholein ' + SVG('arrow') + '</span></a>' +
       '</div></div></section>';
     if (on('paigham')) h += '<section><div class="wrap" style="max-width:820px"><div class="sec-head rv center"><div class="eyebrow">Aaj ka Paigham</div><h2 data-k="paigham.heading">' + T('paigham.heading', 'Aaj ka Paigham') + '</h2></div>' + paigamCard(paigamToday(), true) + '<p class="center" style="margin-top:20px"><a class="linkline" href="#/paigham">Purane Paigham dekhein ' + SVG('arrow') + '</a></p></div></section>';
     if (on('scholar') && S.site.leaderboardVisible) h += '<section style="padding:44px 0"><div class="wrap" style="max-width:820px">' + scholarHtml() + resumeHtml() + '</div></section>';
     else if (on('continue')) h += '<section style="padding:30px 0"><div class="wrap" style="max-width:820px">' + resumeHtml() + '</div></section>';
-    if (on('updates')) h += '<section><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow">Latest Updates & Announcements</div><h2>Naye updates</h2></div>' + updatesHtml(4) + '</div></section>';
-    if (on('media')) h += '<section><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Media</div><h2>Video aur Gallery</h2></div>' + videoHtml() + '<div style="height:28px"></div>' + galleryHtml(6) + '<p class="center" style="margin-top:18px"><a class="linkline" href="#/media">Poori gallery ' + SVG('arrow') + '</a></p></div></section>';
-    if (on('about')) h += '<section><div class="wrap" style="max-width:820px"><div class="sec-head rv center"><div class="eyebrow">About</div><h2 data-k="about.heading">' + T('about.heading', 'Hamara Mission') + '</h2></div><p class="center muted rv" data-k="about.body" style="font-size:1.05rem">' + T('about.body', 'Ye site Paighaam-e-Tajushshariah ki taraf se ek digital library aur quiz ki jagah hai. Mission aur details owner khud likhega.') + '</p><p class="center rv"><a class="linkline" href="#/about">Aur jaane ' + SVG('arrow') + '</a></p></div></section>';
-    if (on('history')) h += '<section style="padding-top:20px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Our History</div><h2>Safar</h2><p class="small">Sample timeline — owner asli tareekh daalega.</p></div>' + historyHtml() + '</div></section>';
+    if (on('updates')) h += '<section><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow" data-k="updates.eyebrow">' + T('updates.eyebrow', 'Latest Updates & Announcements') + '</div><h2 data-k="updates.heading">' + T('updates.heading', 'Naye updates') + '</h2></div>' + updatesHtml(4) + '</div></section>';
+    if (on('media')) h += '<section><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="media.eyebrow">' + T('media.eyebrow', 'Media') + '</div><h2 data-k="media.heading">' + T('media.heading', 'Video aur Gallery') + '</h2></div>' + videoHtml() + '<div style="height:28px"></div>' + galleryHtml(6) + '<p class="center" style="margin-top:18px"><a class="linkline" href="#/media">Poori gallery ' + SVG('arrow') + '</a></p></div></section>';
+    if (on('about')) h += '<section><div class="wrap" style="max-width:820px"><div class="sec-head rv center"><div class="eyebrow" data-k="about.eyebrow">' + T('about.eyebrow', 'About') + '</div><h2 data-k="about.heading">' + T('about.heading', 'Hamara Mission') + '</h2></div><p class="center muted rv" data-k="about.body" style="font-size:1.05rem">' + T('about.body', 'Ye site Paighaam-e-Tajushshariah ki taraf se ek digital library aur quiz ki jagah hai. Mission aur details owner khud likhega.') + '</p><p class="center rv"><a class="linkline" href="#/about">Aur jaane ' + SVG('arrow') + '</a></p></div></section>';
+    if (on('history')) h += '<section style="padding-top:20px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="history.eyebrow">' + T('history.eyebrow', 'Our History') + '</div><h2 data-k="history.heading">' + T('history.heading', 'Safar') + '</h2><p class="small">Sample timeline — owner asli tareekh daalega.</p></div>' + historyHtml() + '</div></section>';
     if (on('taawun_bar')) h += '<section style="padding-top:20px"><div class="wrap" style="max-width:820px">' + taawunHtml() + '</div></section>';
-    if (on('khidmat')) h += '<section><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Hamari Khidmat</div><h2>Khidmat ke kaam</h2></div>' + khidmatHtml() + '</div></section>';
+    if (on('khidmat')) h += '<section><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="khidmat.eyebrow">' + T('khidmat.eyebrow', 'Hamari Khidmat') + '</div><h2 data-k="khidmat.heading">' + T('khidmat.heading', 'Khidmat ke kaam') + '</h2></div>' + khidmatHtml() + '</div></section>';
     if (on('contact')) h += '<section><div class="wrap" style="max-width:720px" id="contact">' + contactHtml() + '</div></section>';
     if (on('comments')) h += '<section id="comments"><div class="wrap" style="max-width:720px">' + commentsHtml() + '</div></section>';
     return h;
@@ -172,7 +185,7 @@
       '<div class="card rv">' + SVG('shelf', 'khidmat-ico') + '<h3 data-k="khidmat.library">' + T('khidmat.library', 'Deeni Library Bareilly me') + '</h3><p class="muted" style="margin-top:8px">Details owner likhega: pata, timing aur kitabon ki list.</p></div></div>';
   }
   function contactHtml() {
-    return '<div class="card rv" id="contact-card"><div class="eyebrow">Connect</div><h2 style="margin:6px 0 8px">Apne khayal share karein</h2><p class="muted" data-k="contact.intro">' + T('contact.intro', 'Message owner tak pahunchega. Owner approve/read karega.') + '</p>' +
+    return '<div class="card rv" id="contact-card"><div class="eyebrow" data-k="contact.eyebrow">' + T('contact.eyebrow', 'Connect') + '</div><h2 style="margin:6px 0 8px" data-k="contact.heading">' + T('contact.heading', 'Apne khayal share karein') + '</h2><p class="muted" data-k="contact.intro">' + T('contact.intro', 'Message owner tak pahunchega. Owner approve/read karega.') + '</p>' +
       '<form class="form" id="contact-form" novalidate><div class="hp"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>' +
       '<div class="field"><label for="c-name">Naam</label><input id="c-name" name="name" required maxlength="80" autocomplete="name"></div>' +
       '<div class="field"><label for="c-email">Email</label><input id="c-email" name="email" type="email" maxlength="120" autocomplete="email"></div>' +
@@ -182,14 +195,14 @@
   }
   function commentsHtml() {
     var list = S.comments.filter(function (c) { return c.status === 'approved'; });
-    return '<div class="sec-head rv"><div class="eyebrow">Comments</div><h2>Comment karein</h2><p class="small">Comment owner approve karega, phir yahan dikhega.</p></div>' +
+    return '<div class="sec-head rv"><div class="eyebrow" data-k="comments.eyebrow">' + T('comments.eyebrow', 'Comments') + '</div><h2 data-k="comments.heading">' + T('comments.heading', 'Comment karein') + '</h2><p class="small">Comment owner approve karega, phir yahan dikhega.</p></div>' +
       '<div class="rv">' + (list.length ? list.map(function (c) { return '<div class="comment"><b>' + esc(c.name) + '</b> <span class="d">· ' + esc(fmtDate(String(c.created || S.today).slice(0, 10))) + '</span><p style="margin:8px 0 0">' + esc(c.message) + '</p></div>'; }).join('') : '<div class="empty" style="margin-bottom:14px">Abhi koi approved comment nahi. Pehla comment aap likh sakte hain.</div>') + '</div>' +
       '<form class="form card rv" id="comment-form" novalidate><div class="hp"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div><div class="field"><label for="m-name">Naam</label><input id="m-name" name="name" required maxlength="60"></div><div class="field"><label for="m-msg">Comment</label><textarea id="m-msg" name="message" required maxlength="500"></textarea></div><div><button class="btn" type="submit">Comment bhejein</button></div><p class="small muted" id="m-err" role="alert"></p></form>';
   }
   function footerHtml() {
     var so = S.site.social || {};
     var links = [['facebook', 'Facebook'], ['instagram', 'Instagram'], ['youtube', 'YouTube'], ['x', 'X']].filter(function (x) { return so[x[0]]; });
-    return '<footer><div class="wrap"><div class="eyebrow">Follow Us</div><div class="socials">' + (links.length ? links.map(function (x) { return '<a href="' + esc(so[x[0]]) + '" target="_blank" rel="noopener">' + SVG(x[0]) + esc(x[1]) + '</a>'; }).join('') : ['facebook', 'instagram', 'youtube', 'x'].map(function (n) { return '<span class="small muted" style="display:inline-flex;gap:8px;align-items:center;padding:9px 14px;border:1px dashed var(--line);border-radius:999px">' + SVG(n) + ' link owner add karega</span>'; }).join('')) + '</div>' +
+    return '<footer><div class="wrap"><div class="eyebrow" data-k="footer.follow">' + T('footer.follow', 'Follow Us') + '</div><div class="socials">' + (links.length ? links.map(function (x) { return '<a href="' + esc(safeUrl(so[x[0]])) + '" target="_blank" rel="noopener">' + SVG(x[0]) + esc(x[1]) + '</a>'; }).join('') : ['facebook', 'instagram', 'youtube', 'x'].map(function (n) { return '<span class="small muted" style="display:inline-flex;gap:8px;align-items:center;padding:9px 14px;border:1px dashed var(--line);border-radius:999px">' + SVG(n) + ' link owner add karega</span>'; }).join('')) + '</div>' +
       '<p class="muted small" data-k="footer.note" style="max-width:520px;margin:0 auto">' + T('footer.note', 'Paighaam-e-Tajushshariah — Ilm ko samjhiye, adab ke saath.') + '</p>' +
       '<div class="legal"><a href="#/about">About</a><a href="#/contact">Contact</a><button data-legal="privacy">Privacy Policy</button><button data-legal="terms">Terms of Use</button><button data-legal="taawun">Ta\'awun Rules</button></div>' +
       '<p class="copy" id="copy" title="">© ' + new Date().getFullYear() + ' Paighaam-e-Tajushshariah' + (St.mode === 'demo' ? ' · DEMO' : '') + '</p></div></footer>';
@@ -201,7 +214,7 @@
     var term = (q.q || '').trim().toLowerCase();
     if (term) list = list.filter(function (b) { return (b.title_en + ' ' + b.title_ur + ' ' + b.writer_en + ' ' + b.writer_ur).toLowerCase().indexOf(term) >= 0; });
     var feat = S.books.filter(function (b) { return b.featured; });
-    var h = '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Taj Library</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Kitabein</h1><p>Kitab par tap karein — Read Now se seedha padh sakte hain.</p></div>' +
+    var h = '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="library.eyebrow">' + T('library.eyebrow', 'Taj Library') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)" data-k="library.heading">' + T('library.heading', 'Kitabein') + '</h1><p>Kitab par tap karein — Read Now se seedha padh sakte hain.</p></div>' +
       resumeHtml() +
       '<div class="toolbar"><label class="search">' + SVG('search') + '<input id="lib-q" type="search" placeholder="Search Books" value="' + esc(q.q || '') + '" aria-label="Search Books"></label></div>' +
       '<div class="chips" role="tablist">' + cats.map(function (c) { return '<button class="chip ' + (c === cat ? 'on' : '') + '" data-cat="' + esc(c) + '">' + esc(c === 'All' ? 'Sab' : c) + '</button>'; }).join('') + '</div>';
@@ -219,18 +232,18 @@
     if (!b) return '<section class="wrap" style="padding-top:60px"><div class="empty">Kitab nahi mili. <a href="#/library">Library par wapas</a></div></section>';
     return '<section style="padding-top:34px"><div class="wrap"><a class="linkline small" href="#/library">' + SVG('back') + ' Library</a><div class="bookpage" style="margin-top:20px"><div class="cover rv">' + bookCover(b) + '</div><div class="rv"><div class="eyebrow">' + esc(b.cat) + '</div><h1 style="margin:8px 0 4px">' + esc(b.title_en) + '</h1><div class="ur" style="font-size:1.4rem;color:var(--gold)">' + esc(b.title_ur) + '</div>' +
       '<dl class="kv"><dt>Writer</dt><dd>' + esc(b.writer_en) + '</dd><dt>مصنف</dt><dd class="ur" style="text-align:right">' + esc(b.writer_ur) + '</dd><dt>Jild</dt><dd>' + esc(b.jild) + '</dd></dl>' +
-      (b.read ? '<div class="ctas" style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" data-act="read" data-id="' + b.id + '">' + SVG('book') + 'Read Now</button><a class="btn ghost" href="' + esc(b.read) + '" target="_blank" rel="noopener">Naye tab me kholein</a></div><div class="viewer" id="viewer" hidden><iframe title="' + esc(b.title_en) + '" src="" allow="autoplay" loading="lazy"></iframe></div>' : '<p class="muted">Is kitab ka link abhi owner ne nahi dala. Jald aayega.</p>') +
+      (b.read ? '<div class="ctas" style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" data-act="read" data-id="' + b.id + '">' + SVG('book') + 'Read Now</button><a class="btn ghost" href="' + esc(safeUrl(b.read)) + '" target="_blank" rel="noopener">Naye tab me kholein</a></div><div class="viewer" id="viewer" hidden><iframe title="' + esc(b.title_en) + '" src="" allow="autoplay" loading="lazy"></iframe></div>' : '<p class="muted">Is kitab ka link abhi owner ne nahi dala. Jald aayega.</p>') +
       '</div></div></div></section>';
   }
   function quizState() { return { done: localStorage.getItem('taj-quiz-done-' + S.today) }; }
   function pageQuiz() {
     var qs = S.quizQ, open = qs.length > 0, done = quizState().done;
     var rules = (S.site.quizRules || []).map(function (r, i) { return '<li><b>' + (i + 1) + '</b><span>' + esc(r) + '</span></li>'; }).join('');
-    var h = '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Taj Quiz</div><h1 style="font-size:clamp(2rem,5vw,3rem)" data-k="quiz.heading">' + T('quiz.heading', 'Taj Quiz') + '</h1><p>' + esc(fmtDate(S.today)) + '</p></div>' +
+    var h = '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="quiz.eyebrow">' + T('quiz.eyebrow', 'Taj Quiz') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)" data-k="quiz.heading">' + T('quiz.heading', 'Taj Quiz') + '</h1><p>' + esc(fmtDate(S.today)) + '</p></div>' +
       '<div class="quiz-grid"><div class="rv"><span class="status ' + (open ? '' : 'closed') + '">' + (open ? 'Quiz open hai' : 'Abhi koi active quiz nahi') + '</span>' +
-      '<div style="margin-top:18px"><div class="eyebrow">Agla Quiz Aane Mein</div><div class="countdown" id="cd"><div><b id="cd-h">00</b><span>Ghante</span></div><div><b id="cd-m">00</b><span>Minute</span></div><div><b id="cd-s">00</b><span>Second</span></div></div></div>';
+      '<div style="margin-top:18px"><div class="eyebrow" data-k="quiz.next">' + T('quiz.next', 'Agla Quiz Aane Mein') + '</div><div class="countdown" id="cd"><div><b id="cd-h">00</b><span>Ghante</span></div><div><b id="cd-m">00</b><span>Minute</span></div><div><b id="cd-s">00</b><span>Second</span></div></div></div>';
     if (!open) h += '<div class="empty" style="margin-top:14px">No active quiz found. Owner aaj ka quiz add karega to yahan form aayega.</div>';
-    h += '<div class="card" style="margin-top:20px"><div class="eyebrow">Rules</div><ul class="rules" style="margin-top:10px">' + rules + '</ul></div></div>';
+    h += '<div class="card" style="margin-top:20px"><div class="eyebrow" data-k="quiz.rules">' + T('quiz.rules', 'Rules') + '</div><ul class="rules" style="margin-top:10px">' + rules + '</ul></div></div>';
     h += '<div class="rv">';
     if (open && !done) {
       h += '<form class="form card" id="quiz-form" novalidate><div class="hp"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div><div class="field"><label for="qn">Naam</label><input id="qn" name="name" required maxlength="60" autocomplete="name"></div><div class="field"><label for="qp">Phone (sirf admin dekhega)</label><input id="qp" name="phone" inputmode="tel" required maxlength="20"></div><div class="field"><label for="qa">Address (sirf admin dekhega)</label><input id="qa" name="address" required maxlength="160"></div>' +
@@ -241,7 +254,7 @@
     } else {
       h += '<div class="empty">Jab owner aaj ka quiz daalega, form yahan aayega. Tab tak leaderboard dekhein.</div>';
     }
-    h += '<div class="card" style="margin-top:20px"><div class="eyebrow">Leaderboard · aaj</div>' + (S.site.leaderboardVisible ? (S.lb.length ? '<ol class="lb" style="margin-top:10px">' + S.lb.map(function (r) { return '<li><span>' + esc(r.first_name) + '</span><b>' + esc(r.score) + '</b></li>'; }).join('') + '</ol>' : '<p class="muted" style="margin-top:8px">Abhi koi score nahi.</p>') : '<p class="muted">Leaderboard owner ne band kiya hai.</p>') + '</div>';
+    h += '<div class="card" style="margin-top:20px"><div class="eyebrow" data-k="quiz.leaderboard">' + T('quiz.leaderboard', 'Leaderboard · aaj') + '</div>' + (S.site.leaderboardVisible ? (S.lb.length ? '<ol class="lb" style="margin-top:10px">' + S.lb.map(function (r) { return '<li><span>' + esc(r.first_name) + '</span><b>' + esc(r.score) + '</b></li>'; }).join('') + '</ol>' : '<p class="muted" style="margin-top:8px">Abhi koi score nahi.</p>') : '<p class="muted">Leaderboard owner ne band kiya hai.</p>') + '</div>';
     return h + '</div></div></div></section>';
   }
   function tickCountdown() {
@@ -251,17 +264,17 @@
   }
   function pagePaigham() {
     var list = S.paigam.filter(function (p) { return p.date <= S.today; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 30);
-    return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv center"><div class="eyebrow">Paigham</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Aaj ka Paigham</h1><p>Har din ka Paigham date ke hisaab se khud aata hai.</p></div>' + paigamCard(paigamToday(), true) +
-      '<div class="eyebrow" style="margin:34px 0 10px">Pichle din</div>' + (list.length > 1 ? list.slice(1).map(function (p) { return '<div class="card" style="margin-bottom:10px;padding:16px 18px"><div class="small muted">' + esc(fmtDate(p.date)) + '</div><div style="font-family:var(--serif);font-size:1.15rem">' + esc(p.text_ro) + (p.sample ? '<span class="tag-sample">sample</span>' : '') + '</div></div>'; }).join('') : '<div class="empty">Pichle din ke Paigham yahan jama honge.</div>') + '</div></section>';
+    return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv center"><div class="eyebrow" data-k="paigham.eyebrow">' + T('paigham.eyebrow', 'Paigham') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Aaj ka Paigham</h1><p>Har din ka Paigham date ke hisaab se khud aata hai.</p></div>' + paigamCard(paigamToday(), true) +
+      '<div class="eyebrow" style="margin:34px 0 10px" data-k="paigham.prev">' + T('paigham.prev', 'Pichle din') + '</div>' + (list.length > 1 ? list.slice(1).map(function (p) { return '<div class="card" style="margin-bottom:10px;padding:16px 18px"><div class="small muted">' + esc(fmtDate(p.date)) + '</div><div style="font-family:var(--serif);font-size:1.15rem">' + esc(p.text_ro) + (p.sample ? '<span class="tag-sample">sample</span>' : '') + '</div></div>'; }).join('') : '<div class="empty">Pichle din ke Paigham yahan jama honge.</div>') + '</div></section>';
   }
-  function pageUpdates() { return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow">Latest Updates & Announcements</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Updates</h1></div>' + updatesHtml() + '</div></section>'; }
+  function pageUpdates() { return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow" data-k="updates.eyebrow">' + T('updates.eyebrow', 'Latest Updates & Announcements') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Updates</h1></div>' + updatesHtml() + '</div></section>'; }
   function pageMedia() {
-    return '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Videos & Gallery</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Media</h1></div>' + videoHtml() + '<div class="sec-head rv" style="margin-top:40px"><div class="eyebrow">Gallery</div><h2>Photos</h2></div>' + galleryHtml() + '</div></section>';
+    return '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="media.page.eyebrow">' + T('media.page.eyebrow', 'Videos & Gallery') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Media</h1></div>' + videoHtml() + '<div class="sec-head rv" style="margin-top:40px"><div class="eyebrow">Gallery</div><h2>Photos</h2></div>' + galleryHtml() + '</div></section>';
   }
   function pageAbout() {
-    return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow">About</div><h1 style="font-size:clamp(2rem,5vw,3rem)" data-k="about.heading">' + T('about.heading', 'Hamara Mission') + '</h1></div>' +
+    return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow" data-k="about.eyebrow">' + T('about.eyebrow', 'About') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)" data-k="about.heading">' + T('about.heading', 'Hamara Mission') + '</h1></div>' +
       '<div class="card rv"><p class="muted" data-k="about.body" style="font-size:1.05rem">' + T('about.body', 'Ye site Paighaam-e-Tajushshariah ki taraf se ek digital library aur quiz ki jagah hai. Mission aur details owner khud likhega.') + '</p><p class="small muted" style="margin-top:14px">DRAFT — owner to review. Mission ka asli text owner ka hoga.</p></div>' +
-      '<div style="margin-top:34px" class="rv"><div class="eyebrow">Our History</div></div>' + historyHtml() + '<div class="eyebrow" style="margin-top:30px">Ek nazar</div><div style="margin-top:12px">' + statsHtml() + '</div></div></section>';
+      '<div style="margin-top:34px" class="rv"><div class="eyebrow" data-k="history.eyebrow">' + T('history.eyebrow', 'Our History') + '</div></div>' + historyHtml() + '<div class="eyebrow" style="margin-top:30px" data-k="about.glance">' + T('about.glance', 'Ek nazar') + '</div><div style="margin-top:12px">' + statsHtml() + '</div></div></section>';
   }
   function pageTawwun() {
     return '<section style="padding-top:34px"><div class="wrap" style="max-width:820px"><div class="sec-head rv"><div class="eyebrow">Tawwun</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Tawwun Page</h1><p data-k="tawwun.intro">' + T('tawwun.intro', 'Welfare ke kaamon ke liye ta\'awun. Details owner share karega.') + '</p></div>' +
@@ -270,7 +283,7 @@
       '<div style="margin-top:18px">' + taawunHtml() + '</div>' +
       '<div class="card rv" style="margin-top:18px"><p style="margin:0">Payment ka tareeqa owner share karega. Is site par koi online payment ya bank/UPI detail nahi hai.</p><div style="margin-top:14px"><a class="btn ghost" href="#/contact">Details ke liye message karein</a></div></div></div></section>';
   }
-  function pageKhidmat() { return '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow">Hamari Khidmat</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Khidmat</h1></div>' + khidmatHtml() + '</div></section>'; }
+  function pageKhidmat() { return '<section style="padding-top:34px"><div class="wrap"><div class="sec-head rv"><div class="eyebrow" data-k="khidmat.eyebrow">' + T('khidmat.eyebrow', 'Hamari Khidmat') + '</div><h1 style="font-size:clamp(2rem,5vw,3rem)">Khidmat</h1></div>' + khidmatHtml() + '</div></section>'; }
   function pageContact() { return '<section style="padding-top:34px"><div class="wrap" style="max-width:720px">' + contactHtml() + '</div></section>'; }
   function pageComments() { return '<section style="padding-top:34px"><div class="wrap" style="max-width:720px">' + commentsHtml() + '</div></section>'; }
 
@@ -289,15 +302,16 @@
   function render() {
     S.today = St.ymd();
     var r = parseRoute();
-    if (r.name === 'tajush-desk') { if (window.TajAdmin) return window.TajAdmin.open(); }
-    if (window.TajAdmin && window.TajAdmin.active && r.name !== 'tajush-desk') window.TajAdmin.active = false;
+    if (r.name === ADMIN_ROUTE) { var eb = $('.editbar'); if (eb) eb.remove(); document.body.classList.remove('editing'); if (window.TajAdmin) return window.TajAdmin.open(); }
+    if (window.TajAdmin && window.TajAdmin.active && r.name !== ADMIN_ROUTE) window.TajAdmin.active = false;
     var html;
     if (r.name === 'book') html = pageBook(r.arg);
     else if (ROUTES[r.name] !== undefined) html = ROUTES[r.name](r.name === 'library' ? r.q : {});
     else html = pageHome();
     var app = $('#app');
     app.innerHTML = demoBanner() + html + (r.name === 'book' ? '' : '') + footerHtml();
-    chrome(); applyTexts(app);
+    chrome(); applyTexts(app); placeTabInd();
+    $$('img[data-hide-broken]', app).forEach(function (im) { im.onerror = function () { im.remove(); }; });
     document.body.classList.toggle('editing', sessionStorage.getItem('tajv2b-edit') === '1' && !!St.session());
     addPencils(app); bindPage(app, r);
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -307,6 +321,7 @@
     if (r.name === '' || r.name === 'comments') { if (r.name === 'comments') { var c = $('#comments'); if (c) setTimeout(function () { c.scrollIntoView(); }, 50); } }
     if (r.name === 'library' && r.q.q) { /* keep focus */ }
   }
+  function placeTabInd() { var tb = $('#tabbar'); if (!tb) return; var ind = tb.querySelector('.ind'); if (!ind) { ind = document.createElement('i'); ind.className = 'ind'; tb.appendChild(ind); } var on = tb.querySelector('a.on') || tb.querySelector('a'); if (!on) return; requestAnimationFrame(function () { var w = ind.offsetWidth || 36; ind.style.transform = 'translate3d(' + (on.offsetLeft + on.offsetWidth / 2 - w / 2) + 'px,0,0)'; }); }
   function demoBanner() { return St.mode === 'demo' ? '<div class="demo-banner"><b>DEMO MODE</b> — not secure. Data is on this phone only. Owner ko live setup chahiye (README).</div>' : ''; }
   function bindPage(app, r) {
     $$('[data-cat]', app).forEach(function (b) { b.onclick = function () { location.hash = '#/library?cat=' + encodeURIComponent(b.dataset.cat); }; });
@@ -335,10 +350,7 @@
       if (tapN >= 3) { tapN = 0; openAdminLogin(); }
     };
   }
-  function openAdminLogin() {
-    modal('Owner login', '<p class="muted small">Sirf owner ke liye. ' + (St.mode === 'demo' ? '<b>DEMO MODE — not secure</b>: user <code>demo</code>, password <code>demo</code>.' : 'Email aur password jo owner ne Supabase me banaya.') + '</p><form id="login-form" class="form" style="margin-top:12px"><div class="field"><label for="le">Email / user</label><input id="le" autocomplete="username" required></div><div class="field"><label for="lp">Password</label><input id="lp" type="password" autocomplete="current-password" required></div><p class="small" id="le-err" role="alert" style="color:#9A3B2E"></p><div class="actions" style="margin-top:6px"><button class="btn ghost sm" type="button" data-close>Band karein</button><button class="btn sm" type="submit">Login</button></div></form>', '');
-    var f = $('#login-form'); f.onsubmit = function (e) { e.preventDefault(); St.login($('#le').value.trim(), $('#lp').value).then(function () { $('#modal').classList.remove('on'); location.hash = '#/tajush-desk'; }).catch(function (err) { $('#le-err').textContent = err.message; }); };
-  }
+  function openAdminLogin() { location.hash = '#/' + ADMIN_ROUTE; }
   function act(name, el, e) {
     if (name === 'closeall') return closeAll();
     if (name === 'more') return openDrawer(true);
@@ -395,7 +407,7 @@
     St.insert('messages', { name: name, email: email, phone: form.phone.value.trim(), message: msg, read: false }).then(function (row) {
       if (St.mode === 'live' && window.TAJ_CONFIG.contactFunction && row) fetch(window.TAJ_CONFIG.supabaseUrl + '/functions/v1/' + window.TAJ_CONFIG.contactFunction, { method: 'POST', headers: { apikey: window.TAJ_CONFIG.supabaseAnonKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: row.id }) }).catch(function () {});
       success('contact-card');
-    }).catch(function (e) { btn.disabled = false; err.textContent = 'Nahi gaya: ' + e.message; });
+    }).catch(function (e) { btn.disabled = false; err.textContent = 'Nahi gaya: ' + e.message; shakeEl(err); });
   }
   function submitComment(form) {
     var err = $('#m-err'); err.textContent = '';
@@ -403,12 +415,12 @@
     if (!name || !msg) { err.textContent = 'Naam aur comment likhein.'; return; }
     if (!honeypotOk(form)) return success('comments');
     if (!rateOk('taj-rate-comment', 60000)) { err.textContent = 'Ek minute baad dobara likhein.'; return; }
-    St.insert('comments', { name: name, message: msg, status: 'pending' }).then(function () { success('comments', 'Shukriya! Comment owner ki approval ke baad dikhega.'); }).catch(function (e) { err.textContent = 'Nahi gaya: ' + e.message; });
+    St.insert('comments', { name: name, message: msg, status: 'pending' }).then(function () { success('comments', 'Shukriya! Comment owner ki approval ke baad dikhega.'); }).catch(function (e) { err.textContent = 'Nahi gaya: ' + e.message; shakeEl(err); });
   }
   function success(id, text) {
     var el = $('#' + id) || $('#app');
     var ok = '<div class="okmsg rv in"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30"/><path d="M22 37l9 9 19-20"/></svg><h3>' + esc(text || 'Shukriya! Message mil gaya.') + '</h3><p class="muted">Owner ise dekhega.</p></div>';
-    if (el.id === 'contact-card') el.innerHTML = '<div class="eyebrow">Connect</div>' + ok; else el.innerHTML = ok;
+    if (el.id === 'contact-card') el.innerHTML = '<div class="eyebrow" data-k="contact.eyebrow">' + T('contact.eyebrow', 'Connect') + '</div>' + ok; else el.innerHTML = ok;
     toast('Bhej diya');
   }
   function bindQuiz(form) {
@@ -426,13 +438,14 @@
         localStorage.setItem('taj-quiz-done-' + S.today, score + ' / ' + S.quizQ.length);
         toast('Quiz submit ho gaya');
         return St.list('leaderboard', { eq: { date: S.today }, limit: 10 }).then(function (lb) { S.lb = lb; render(); }).catch(function () { render(); });
-      }).catch(function (e) { btn.disabled = false; err.textContent = 'Nahi gaya: ' + e.message; });
+      }).catch(function (e) { btn.disabled = false; err.textContent = 'Nahi gaya: ' + e.message; shakeEl(err); });
     };
   }
   function applyTexts(root) {
     $$('[data-k]', root).forEach(function (el) {
-      var k = el.dataset.k; var o = S.site.texts && S.site.texts[k]; if (!o) return;
-      if (el.dataset.link && o.url) el.setAttribute('href', o.url);
+      var k = el.dataset.k;
+      var lu = S.site.texts && S.site.texts[k + '.url'];
+      if (el.dataset.link && lu && safeUrl(lu.text)) el.setAttribute('href', safeUrl(lu.text));
     });
   }
   // Pencil editor (owner only): text + link overlay on the real page
@@ -448,11 +461,13 @@
   function editText(k, isLink, el) {
     var o = (S.site.texts && S.site.texts[k]) || {};
     var cur = o.text != null ? o.text : el.textContent.replace(/\s*$/, '');
-    var m = modal('Text badlein', '<div class="form"><div class="field"><label>Text</label><textarea id="ed-t">' + esc(cur) + '</textarea></div>' + (isLink ? '<div class="field"><label>Link (https://… ya #/page)</label><input id="ed-u" value="' + esc(o.url || el.getAttribute('href') || '') + '"></div>' : '') + '</div>', '<button class="btn ghost sm" data-close>Cancel</button><button class="btn sm" id="ed-save">Save</button>');
+    var lu = (S.site.texts && S.site.texts[k + '.url']) || {};
+    var m = modal('Text badlein', '<div class="form"><div class="field"><label>Text</label><textarea id="ed-t">' + esc(cur) + '</textarea></div>' + (isLink ? '<div class="field"><label>Link (https://… ya #/page)</label><input id="ed-u" value="' + esc(lu.text || el.getAttribute('href') || '') + '"></div>' : '') + '</div>', '<button class="btn ghost sm" data-close>Cancel</button><button class="btn sm" id="ed-save">Save</button>');
     $('#ed-save').onclick = function () {
       var t = $('#ed-t').value; var u = isLink ? $('#ed-u').value.trim() : undefined;
-      var texts = Object.assign({}, S.site.texts); texts[k] = { text: t, url: u || (o.url || '') };
-      St.saveSite({ texts: texts }).then(function (s) { S.site = s; toast('Save ho gaya'); m.classList.remove('on'); render(); }).catch(function (e) { toast('Save nahi hua: ' + e.message); });
+      var jobs = [St.setText(k, t)];
+      if (isLink && u !== undefined) jobs.push(St.setText(k + '.url', safeUrl(u) ? u : ''));
+      Promise.all(jobs).then(function () { return St.getSite(); }).then(function (s) { S.site = s; toast('Save ho gaya'); m.classList.remove('on'); render(); }).catch(function (e) { toast('Save nahi hua: ' + e.message); });
     };
   }
 
@@ -489,10 +504,21 @@
       var t = e.target.closest('[data-theme],[data-uscale]');
       if (t && t.dataset.theme) { PREF.theme = t.dataset.theme; localStorage.setItem('taj-theme', PREF.theme); applyPrefs(); $$('[data-theme]').forEach(function (b) { b.classList.toggle('on', b.dataset.theme === PREF.theme); }); }
       if (t && t.dataset.uscale) { PREF.uscale = parseFloat(t.dataset.uscale); localStorage.setItem('taj-uscale', String(PREF.uscale)); applyPrefs(); }
+      var an = e.target.closest('[data-anim]');
+      if (an) { PREF.anim = an.dataset.anim; localStorage.setItem('taj-anim', PREF.anim); applyPrefs(); $$('[data-anim]').forEach(function (b) { b.classList.toggle('on', b.dataset.anim === PREF.anim); }); }
       var a = e.target.closest('a[href^="#/"]'); if (a) closeAll();
     });
-    window.addEventListener('hashchange', function () { if (window.TajAdmin && window.TajAdmin.active && parseRoute().name !== 'tajush-desk') { window.TajAdmin.active = false; } closeAll(); render(); });
+    window.addEventListener('hashchange', function () { if (window.TajAdmin && window.TajAdmin.active && parseRoute().name !== ADMIN_ROUTE) { window.TajAdmin.active = false; } closeAll(); render(); });
     window.addEventListener('resize', applyPrefs);
+    // parallax: the hero ornament drifts slowly with scroll (transform only, full motion only)
+    var px = 0, pxRaf = 0;
+    window.addEventListener('scroll', function () { px = window.scrollY; if (pxRaf) return; pxRaf = requestAnimationFrame(function () { pxRaf = 0; if (!document.body.classList.contains('anim-full')) return; var o = $('.photo-slot .orn svg'); if (o) o.style.transform = 'translate3d(0,' + Math.min(px * 0.08, 60).toFixed(1) + 'px,0)'; }); }, { passive: true });
+    // ripple on press
+    document.addEventListener('pointerdown', function (e) {
+      var b = e.target.closest && e.target.closest('.btn'); if (!b || document.body.classList.contains('anim-off')) return;
+      var r = b.getBoundingClientRect(); var s = document.createElement('span'); s.className = 'rip';
+      s.style.left = (e.clientX - r.left) + 'px'; s.style.top = (e.clientY - r.top) + 'px'; b.appendChild(s); setTimeout(function () { s.remove(); }, 650);
+    }, { passive: true });
     // PWA
     var deferred = null; window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; var b = $('#install-btn'); if (b) b.hidden = false; });
     document.addEventListener('click', function (e) { if (e.target.closest('#install-btn') && deferred) { deferred.prompt(); deferred = null; } });
@@ -502,9 +528,9 @@
       if (St.mode === 'live' && !S.site) S.site = {};
       // Fold in admin's 'edit' flag
       render();
-      if (parseRoute().name === 'tajush-desk') { /* admin handled inside render */ }
+      
     });
   }
-  window.TajApp = { fmtDate: fmtDate, S: S, render: render, load: load, toast: toast, modal: modal, esc: esc, $: $, $$: $$, applyPrefs: applyPrefs, chrome: chrome, parseRoute: parseRoute, openAdminLogin: openAdminLogin, reloadAll: function () { return load().then(render); } };
+  window.TajApp = { placeTabInd: placeTabInd, fmtDate: fmtDate, S: S, render: render, load: load, toast: toast, modal: modal, esc: esc, $: $, $$: $$, applyPrefs: applyPrefs, chrome: chrome, parseRoute: parseRoute, openAdminLogin: openAdminLogin, ADMIN_ROUTE: ADMIN_ROUTE, reloadAll: function () { return load().then(render); } };
   document.addEventListener('DOMContentLoaded', boot);
 })();
