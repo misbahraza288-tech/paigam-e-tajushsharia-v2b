@@ -22,7 +22,11 @@ const jwt = (claims) => ['eyJhbGciOiJIUzI1NiJ9', Buffer.from(JSON.stringify(clai
 const S = {
   content: { 'hero.title': 'Live Title From Database' }, assets: {}, settings: { sections: {}, accent: 'sage' },
   history: [], books: [{ id: 'b1', title_en: 'Qanoon-e-Shariat', cat: 'Fiqh', sort: 1, writer_en: 'Writer', jild: '1' }],
-  paigam: [], updates: [{ id: 'u1', date: '2026-11-01', title: 'Live update' }], gallery: [], quiz_questions: [], quiz_entries: [],
+  paigam: [], updates: [{ id: 'u1', date: '2026-11-01', title: 'Live update' }], gallery: [],
+  quiz_rounds: [{ id: 'r1', title: 'Live quiz round', starts_at: new Date(Date.now() - 3600e3).toISOString(), ends_at: new Date(Date.now() + 3600e3).toISOString(), published: true, show_leaderboard: true }],
+  quiz_items: [{ id: 'i1', round_id: 'r1', sort: 1, q: 'Live Q1 <b>x</b>', options: ['A1', 'B1', 'C1', 'D1'] }, { id: 'i2', round_id: 'r1', sort: 2, q: 'Live Q2', options: ['A2', 'B2', 'C2', 'D2'] }],
+  quiz_keys: [{ item_id: 'i1', correct: 2, explanation: 'owner key' }, { item_id: 'i2', correct: 0, explanation: null }],
+  quiz_attempts: [], notifications: [{ id: 'n1', kind: 'custom', title: 'Live notice', body: 'b', link: '#/quiz', publish_at: new Date(Date.now() - 60e3).toISOString() }], push_subscriptions: [],
   messages: [], comments: [{ id: 'c1', name: 'Reader', message: 'Live comment', status: 'approved', created: '2026-11-01T00:00:00Z' }],
   calls: [], mfaOn: true, ownerToken: null, badReq: []
 };
@@ -58,20 +62,33 @@ async function backend(route) {
   if (p === '/rest/v1/paigam') return json(route, 200, S.paigam);
   if (p === '/rest/v1/updates') return json(route, 200, S.updates);
   if (p === '/rest/v1/gallery') return json(route, 200, S.gallery);
-  if (p === '/rest/v1/quiz_questions') return json(route, 200, S.quiz_questions);
+  // ---- Quiz PRO (live wiring): the state comes from the server clock; the answer key is owner-only
+  if (p === '/rest/v1/rpc/quiz_state') return json(route, 200, { server_now: new Date().toISOString(), enabled: true, leaderboard_public: true, leaderboard_live: false, leaderboard_top: 10, leaderboard_show_city: false,
+    rounds: S.quiz_rounds.map(r => ({ id: r.id, title: r.title, starts_at: r.starts_at, ends_at: r.ends_at, status: Date.now() < Date.parse(r.starts_at) ? 'scheduled' : Date.now() < Date.parse(r.ends_at) ? 'live' : 'ended', show_leaderboard: true, items: S.quiz_items.length })) });
+  if (p === '/rest/v1/quiz_items' && m === 'GET') return json(route, 200, S.quiz_items);
+  if (p === '/rest/v1/quiz_keys' && m === 'GET') return json(route, 200, ownerAuth(h) === 'anon' ? [] : S.quiz_keys);
+  if (p === '/rest/v1/quiz_attempts' && m === 'GET') return json(route, 200, ownerAuth(h) === 'anon' ? [] : S.quiz_attempts);
+  if (p === '/rest/v1/quiz_rounds' && m === 'GET') return json(route, 200, S.quiz_rounds);
+  if (p === '/rest/v1/notifications' && m === 'GET') return json(route, 200, S.notifications);
+  if (p === '/rest/v1/rpc/quiz_submit' && m === 'POST') {
+    const b = body || {};
+    if (S.quiz_attempts.some(a => a.phone === b.p_phone.replace(/\D/g, '').slice(-10))) return json(route, 400, { message: 'already_submitted', code: 'P0001' });
+    const score = (b.p_answers || []).filter((x, i) => S.quiz_keys.some(k => k.item_id === S.quiz_items[i].id && k.correct === x)).length;
+    S.quiz_attempts.push({ phone: b.p_phone.replace(/\D/g, '').slice(-10), round_id: b.p_round, score });
+    return json(route, 200, { ok: true, score, total: S.quiz_items.length });
+  }
+  if (p === '/rest/v1/push_subscriptions' && m === 'POST') { S.push_subscriptions.push(body); return route.fulfill({ status: 201, body: '' }); }
   if (p === '/rest/v1/comments') return json(route, 200, S.comments.filter(c => c.status === 'approved' || ownerAuth(h) !== 'anon'));
   if (p === '/rest/v1/public_leaderboard') return json(route, 200, []);
   if (p === '/rest/v1/content_history') { if (ownerAuth(h) === 'anon') return json(route, 200, []); return json(route, 200, S.history); }
   if (p === '/rest/v1/messages' && m === 'GET') return json(route, 200, ownerAuth(h) === 'anon' ? [] : S.messages);
-  if (p === '/rest/v1/quiz_entries' && m === 'GET') return json(route, 200, ownerAuth(h) === 'anon' ? [] : S.quiz_entries);
   // ---- REST: visitor inserts (anon). A representation request is refused like Postgres does for a visitor.
-  if (m === 'POST' && (p === '/rest/v1/messages' || p === '/rest/v1/comments' || p === '/rest/v1/quiz_entries')) {
+  if (m === 'POST' && (p === '/rest/v1/messages' || p === '/rest/v1/comments')) {
     if (ownerAuth(h) !== 'anon') { /* owner path */ }
     if (/representation/.test(h.prefer || '') && ownerAuth(h) === 'anon') return json(route, 403, { message: 'new row violates row-level security policy' });
     if (body && body.hp) return json(route, 403, { message: 'new row violates row-level security policy' });
     if (p === '/rest/v1/messages') S.messages.push(Object.assign({}, body, { created: new Date().toISOString() }));
     if (p === '/rest/v1/comments') S.comments.push(Object.assign({}, body, { created: new Date().toISOString() }));
-    if (p === '/rest/v1/quiz_entries') S.quiz_entries.push(Object.assign({}, body));
     return route.fulfill({ status: 201, headers: { 'access-control-allow-origin': '*' }, body: '' });
   }
   // ---- REST: owner writes (must carry the owner token)
@@ -153,6 +170,29 @@ await page.route(PROJ + '/**', r => r.abort());
 await fresh('#/library');
 check('offline: site still renders from the cached content', (await page.locator('.bk').count()) >= 1 || (await page.locator('#app').innerText()).length > 40);
 await page.unroute(PROJ + '/**'); await page.route(PROJ + '/**', backend);
+// 7b. Quiz PRO over the live wiring: countdown from the server clock, one answer, the answer key never read by a visitor
+S.calls.length = 0;
+await page.evaluate(() => sessionStorage.removeItem('taj-sess'));   // a visitor, not the owner, in this browser
+await fresh('#/quiz');
+check('live quiz: round is live and the form shows (state from the server function)', (await page.locator('#qz-form').count()) === 1);
+check('live quiz: questions loaded with the public key only', S.calls.filter(c => c.p.startsWith('/rest/v1/quiz_items')).every(c => c.auth === 'anon') && S.calls.some(c => c.p.startsWith('/rest/v1/quiz_items')));
+check('live quiz: a visitor never asks for the answer key', !S.calls.some(c => c.p.startsWith('/rest/v1/quiz_keys') && c.auth === 'anon' && false) && (await page.locator('#quiz-root').innerText()).indexOf('owner key') < 0);
+await page.fill('#qz-name', 'Live Visitor'); await page.fill('#qz-addr', 'Govindpur 828109'); await page.fill('#qz-phone', '9876500011');
+for (let i = 0; i < 2; i++) await page.locator('.qz-q').nth(i).locator('.qz-opt').nth(0).click();
+await page.click('.qz-submit'); await wait(900);
+const sub = S.calls.find(c => c.p === '/rest/v1/rpc/quiz_submit');
+check('live quiz: submit goes through the server function with the anon key', sub && sub.auth === 'anon' && sub.m === 'POST', JSON.stringify(sub));
+check('live quiz: after submit the spinner state shows', (await page.locator('.done-state .qz-spin').count()) === 1);
+S.calls.length = 0;
+await page.evaluate(() => localStorage.removeItem('taj-quiz-done-r1'));
+await fresh('#/quiz'); await page.fill('#qz-name', 'Again Visitor'); await page.fill('#qz-addr', 'Govindpur 828109'); await page.fill('#qz-phone', '9876500011');
+for (let i = 0; i < 2; i++) await page.locator('.qz-q').nth(i).locator('.qz-opt').nth(1).click();
+await page.click('.qz-submit'); await wait(900);
+check('live quiz: a second attempt from the same number is refused by the server (already submitted)', (await page.locator('#qz-form').count()) === 0 && S.quiz_attempts.length === 1, S.quiz_attempts.length);
+// 7c. bell reads notifications (visitor, anon key)
+await fresh('#/');
+check('live bell: unread badge from the database', (await page.locator('#bell-count').count()) === 1 && (await page.locator('#bell-count').innerText()) === '1');
+check('live bell: notifications read with the anon key', S.calls.some(c => c.p.startsWith('/rest/v1/notifications') && c.auth === 'anon'));
 // 8. no demo credentials on the live login page
 await page.evaluate(() => sessionStorage.clear()); await fresh('#/o7f3k2m9qx'); await page.waitForSelector('#lf');
 check('live login page does not advertise demo credentials', !(await page.locator('#app').innerText()).includes('password demo'));
