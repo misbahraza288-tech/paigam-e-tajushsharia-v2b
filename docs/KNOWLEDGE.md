@@ -47,3 +47,19 @@ See docs/OWNER-GUIDE.md section 5. Summary: new owner user + owners row; remove 
 
 ## Changing the hidden route
 `adminRoute` in `assets/js/config.js`. Changing it does not change the security; it only changes what a visitor would have to guess.
+
+## Quiz PRO (added 2026-11-05)
+- Tables: `quiz_rounds` (title, starts/ends, published, show_leaderboard), `quiz_items` (question, 4 options), `quiz_keys` (correct index + explanation, owner only), `quiz_attempts` (name, address, phone_norm, city, answers, score, winner/pinned/hidden; unique on (round_id, phone_norm)).
+- Visitors call three functions only: `quiz_state()` (server clock + rounds, no answers), `quiz_submit(...)` (checks the window, phone, answers; scores on the server; one attempt), `quiz_reveal(round)` (answers after the end) and `quiz_leaderboard(round)` (first name + score, after the end or live when allowed). No visitor insert/read policy exists on the answer key or attempts; grants are revoked too.
+- Clock: `TajStore.now()` is the server's clock in live mode (offset from `quiz_state`). In demo mode it is the phone clock plus `localStorage['taj-demo-offset']` — a test/preview hook, not used in live.
+- Demo mode mirrors the functions in `data.js` (`demoRpc`) and the notification triggers (`demoAutoNotes`, `demoRoundNotes`). Demo is NOT secure: its data is in the browser.
+- Notifications: rows with `publish_at` (visitors see them once that time has passed). "Soon" and "started" are rows with future `publish_at`, so no cron job is needed. Triggers on updates, books, paigam, quiz_rounds create them per the `auto` settings.
+- Leaderboard ranking: pinned first, then score desc, then earliest submit; hidden entries left out; ranks 1..n; city only if the owner allows; never address or phone.
+- Push: `push_subscriptions` insert-only for visitors (https endpoint, shape checks), owner reads/deletes. `send-push` Edge Function checks `is_owner()` with the caller's token, uses the service role only server-side. Not tested against real push services.
+- Known gaps: one attempt is per typed phone number (no login); OTP is the next step. Editing questions after answers exist is blocked in the admin UI (the score would change).
+
+## Test coverage (2026-11-05)
+- `tests/sql/rls-test.mjs` (PGlite): 90 checks — anon cannot read answers or attempts before the end, cannot submit outside the window, cannot submit twice, cannot read submissions, leaderboard ranking and privacy, owner switches, notification visibility, push endpoint shape.
+- `tests/smoke-demo.mjs`: 112 checks at 390x844 — countdown states (mocked clock), questions visible only in the window, one attempt, validation, after-end answers and board, quiz off, admin calendar, on/off, round editor with XSS probes, attempts (pin, winner, CSV), alerts settings and composer, bell.
+- `tests/live-mock.mjs`: 30 checks — live wiring with the anon key, RPC calls, refusals, notifications.
+- Not tested: a real Supabase project, real push, a real phone, the .in domain.
